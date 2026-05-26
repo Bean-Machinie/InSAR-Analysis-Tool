@@ -47,7 +47,16 @@ Then run:
 
 ## Where to place data
 
-Copy your processed project folder into:
+You can open a project from the application menu:
+
+```text
+File > Open Project...
+```
+
+This opens a native Windows folder picker from the local Flask backend. Select
+the processed project folder that contains the NetCDF result file.
+
+You can also copy your processed project folder into the default location:
 
 ```text
 data/project_D/
@@ -70,8 +79,8 @@ The default project path is configured in `app/main.py`:
 DEFAULT_PROJECT_DIR = BASE_DIR / "data" / "project_D"
 ```
 
-You can also enter another local project folder path in the app's project folder
-field and click `Load`.
+Then start the app and choose `File > Open Project...`, or keep using the
+default project path in `app/main.py`.
 
 ## NetCDF Selection Order
 
@@ -153,6 +162,11 @@ Sets the current project folder for the local Flask process. Use an empty
 
 Returns selected file, grid counts, dates, product availability, and geographic
 bounds.
+
+`POST /api/browse-folder`
+
+Opens a native local folder picker and sets the current project folder to the
+selected directory. This endpoint is intended for local desktop use only.
 
 `GET /api/map-data`
 

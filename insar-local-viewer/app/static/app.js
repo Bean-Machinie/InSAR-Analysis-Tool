@@ -7,8 +7,12 @@ const state = {
 };
 
 const els = {
-  projectForm: document.querySelector("#project-form"),
-  projectPath: document.querySelector("#project-path"),
+  fileMenuButton: document.querySelector("#file-menu-button"),
+  fileMenu: document.querySelector("#file-menu"),
+  openProjectButton: document.querySelector("#open-project-button"),
+  reloadProjectButton: document.querySelector("#reload-project-button"),
+  heroOpenProjectButton: document.querySelector("#hero-open-project-button"),
+  currentProjectLabel: document.querySelector("#current-project-label"),
   status: document.querySelector("#status"),
   datasetFile: document.querySelector("#dataset-file"),
   gridDetails: document.querySelector("#grid-details"),
@@ -405,6 +409,7 @@ function renderDatasetDetails() {
   const project = state.data.project;
   const bounds = project.bounds;
   els.datasetFile.textContent = project.dataset_file;
+  els.currentProjectLabel.textContent = project.project_path;
   els.gridDetails.textContent = `${project.lat_count} rows x ${project.lon_count} columns, ${project.date_count} dates`;
   els.boundsDetails.textContent = `${formatNumber(bounds.lat_min, 5)} to ${formatNumber(bounds.lat_max, 5)} lat; ${formatNumber(bounds.lon_min, 5)} to ${formatNumber(bounds.lon_max, 5)} lon`;
 }
@@ -412,11 +417,13 @@ function renderDatasetDetails() {
 async function loadProject(projectPath = "") {
   setStatus("Loading project data...");
   try {
-    await fetchJson("/api/project", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_path: projectPath }),
-    });
+    if (projectPath !== "__CURRENT__") {
+      await fetchJson("/api/project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_path: projectPath }),
+      });
+    }
     state.data = await fetchJson("/api/map-data");
     state.dateIndex = 0;
     state.selectedPixel = null;
@@ -433,9 +440,52 @@ async function loadProject(projectPath = "") {
   }
 }
 
-els.projectForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  loadProject(els.projectPath.value.trim());
+function setMenuOpen(open) {
+  els.fileMenu.hidden = !open;
+  els.fileMenuButton.setAttribute("aria-expanded", String(open));
+}
+
+async function openProjectFromFolderPicker() {
+  setMenuOpen(false);
+  setStatus("Opening folder picker...");
+  try {
+    const result = await fetchJson("/api/browse-folder", { method: "POST" });
+    if (result.cancelled) {
+      setStatus("Folder selection cancelled.");
+      return;
+    }
+
+    state.data = await fetchJson("/api/map-data");
+    state.dateIndex = 0;
+    state.selectedPixel = null;
+    renderDatasetDetails();
+    updateControls();
+    drawMap();
+    drawTimeSeries();
+    setStatus("Project loaded.", "success");
+  } catch (error) {
+    state.data = null;
+    drawMap();
+    drawTimeSeries();
+    setStatus(error.message, "error");
+  }
+}
+
+els.fileMenuButton.addEventListener("click", () => {
+  setMenuOpen(els.fileMenu.hidden);
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".menu-root")) {
+    setMenuOpen(false);
+  }
+});
+
+els.openProjectButton.addEventListener("click", openProjectFromFolderPicker);
+els.heroOpenProjectButton.addEventListener("click", openProjectFromFolderPicker);
+els.reloadProjectButton.addEventListener("click", () => {
+  setMenuOpen(false);
+  loadProject("__CURRENT__");
 });
 
 els.layerButtons.forEach((button) => {
@@ -469,4 +519,4 @@ window.addEventListener("resize", () => {
 updateControls();
 drawMap();
 drawTimeSeries();
-loadProject();
+setStatus("Use File > Open Project... to select a processed InSAR project folder.");

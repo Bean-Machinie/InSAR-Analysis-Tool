@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 
 from flask import Flask, jsonify, render_template, request
 
@@ -38,6 +39,26 @@ def load_project():
     return _json_response(lambda: get_project_info(_current_project_dir()))
 
 
+@app.route("/api/browse-folder", methods=["POST"])
+def browse_folder():
+    try:
+        selected_path = _open_folder_dialog()
+    except Exception as exc:
+        return jsonify({"error": f"Could not open folder picker: {exc}"}), 500
+
+    if not selected_path:
+        return jsonify({"cancelled": True})
+
+    app.config["PROJECT_DIR"] = Path(selected_path).resolve()
+    return _json_response(
+        lambda: {
+            "cancelled": False,
+            "project_path": str(_current_project_dir()),
+            "project_info": get_project_info(_current_project_dir()),
+        }
+    )
+
+
 @app.route("/api/project-info")
 def project_info():
     return _json_response(lambda: get_project_info(_current_project_dir()))
@@ -65,6 +86,32 @@ def _json_response(callback):
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": f"Unexpected error: {exc}"}), 500
+
+
+def _open_folder_dialog() -> str:
+    result = {"path": ""}
+
+    def choose_folder():
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        initial_dir = _current_project_dir()
+        if not initial_dir.exists():
+            initial_dir = BASE_DIR
+        result["path"] = filedialog.askdirectory(
+            title="Open Processed InSAR Project Folder",
+            initialdir=str(initial_dir),
+            mustexist=True,
+        )
+        root.destroy()
+
+    thread = threading.Thread(target=choose_folder)
+    thread.start()
+    thread.join()
+    return result["path"]
 
 
 if __name__ == "__main__":

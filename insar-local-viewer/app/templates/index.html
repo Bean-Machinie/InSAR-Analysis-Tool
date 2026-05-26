@@ -7,19 +7,31 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   </head>
   <body>
+    <nav class="menubar" aria-label="Application menu">
+      <div class="brand-mark">InSAR Local Viewer</div>
+      <div class="menu-root">
+        <button id="file-menu-button" class="menu-button" type="button" aria-haspopup="true" aria-expanded="false">File</button>
+        <div id="file-menu" class="menu-popover" role="menu" hidden>
+          <button id="open-project-button" type="button" role="menuitem">Open Project...</button>
+          <button id="reload-project-button" type="button" role="menuitem">Reload Current Project</button>
+        </div>
+      </div>
+      <div id="current-project-label" class="current-project">No project loaded</div>
+    </nav>
+
     <main class="app-shell">
       <header class="topbar">
         <div>
           <h1>InSAR Local Viewer</h1>
           <p>Velocity, deformation, and coherence inspection for processed SBAS results.</p>
         </div>
-        <form id="project-form" class="project-loader">
-          <label for="project-path">Project folder</label>
+        <div class="open-card">
           <div>
-            <input id="project-path" type="text" placeholder="data/project_D">
-            <button type="submit">Load</button>
+            <strong>Open a processed project folder</strong>
+            <span>Use File &gt; Open Project... to select a folder on this computer.</span>
           </div>
-        </form>
+          <button id="hero-open-project-button" type="button">Open Project...</button>
+        </div>
       </header>
 
       <section id="status" class="status" aria-live="polite"></section>

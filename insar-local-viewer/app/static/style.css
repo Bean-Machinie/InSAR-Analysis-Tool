@@ -24,6 +24,80 @@ body {
   line-height: 1.45;
 }
 
+.menubar {
+  align-items: center;
+  background: #ffffff;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  min-height: 42px;
+  padding: 0 12px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.brand-mark {
+  font-weight: 700;
+  padding-right: 8px;
+}
+
+.menu-root {
+  position: relative;
+}
+
+.menu-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+  min-height: 32px;
+  padding: 4px 12px;
+}
+
+.menu-button:hover,
+.menu-button[aria-expanded="true"] {
+  background: #eef1f4;
+  border-color: var(--border);
+}
+
+.menu-popover {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  left: 0;
+  min-width: 220px;
+  padding: 6px;
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 30;
+}
+
+.menu-popover button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 6px;
+  color: var(--text);
+  display: block;
+  font-weight: 400;
+  min-height: 34px;
+  text-align: left;
+  width: 100%;
+}
+
+.menu-popover button:hover {
+  background: #eef1f4;
+}
+
+.current-project {
+  color: var(--muted);
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 button,
 input {
   font: inherit;
@@ -54,7 +128,6 @@ input {
   margin: 6px 0 0;
 }
 
-.project-loader label,
 .panel label {
   color: var(--muted);
   display: block;
@@ -63,22 +136,26 @@ input {
   margin-bottom: 6px;
 }
 
-.project-loader div {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.project-loader input,
 .panel input[type="range"] {
   width: 100%;
 }
 
-.project-loader input {
+.open-card {
+  align-items: center;
+  background: #ffffff;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  min-height: 40px;
-  padding: 8px 10px;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.open-card span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.9rem;
+  margin-top: 2px;
 }
 
 button {
@@ -331,7 +408,7 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .project-loader div,
+  .open-card,
   .map-header {
     grid-template-columns: 1fr;
   }
