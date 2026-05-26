@@ -1,10 +1,16 @@
 # InSAR Local Viewer
 
-A small local Flask application for inspecting processed InSAR/SBAS project data.
+A portable local Flask web application for viewing the core user-facing outputs
+from a processed InSAR/SBAS project:
 
-This first version opens a local project folder, selects the best available NetCDF
-file, lists variables and coordinates, and returns summary statistics for selected
-2D layers. It does not render maps or rasters yet.
+- LOS velocity map
+- LOS deformation/displacement map by acquisition date
+- Coherence map
+- Coherence-based visual filtering for velocity and deformation
+
+The app is intentionally focused on map inspection for non-specialist users. It
+does not expose advanced NetCDF browsing or secondary scientific layers in the
+main UI.
 
 ## Run on Windows
 
@@ -61,12 +67,13 @@ data/project_D/
 The default project path is configured in `app/main.py`:
 
 ```python
-PROJECT_DIR = BASE_DIR / "data" / "project_D"
+DEFAULT_PROJECT_DIR = BASE_DIR / "data" / "project_D"
 ```
 
-You can update that value if your local data lives somewhere else.
+You can also enter another local project folder path in the app's project folder
+field and click `Load`.
 
-## NetCDF selection order
+## NetCDF Selection Order
 
 The app automatically selects the first available file in this order:
 
@@ -75,46 +82,93 @@ The app automatically selects the first available file in this order:
 3. `results_wide.nc`
 4. First available `.nc` file in the project folder
 
-## What this version can do
+## Supported Products
 
-- Start a local Flask web app.
-- Open a local processed InSAR project folder.
-- Select a NetCDF file automatically.
-- Show available variables and coordinate names.
-- Show lat/lon/date counts.
-- Show geographic bounds from `lat` and `lon`.
-- Return basic statistics for selected 2D layers.
+The viewer keeps the main UI limited to:
 
-## Not implemented yet
+- `Velocity`: LOS velocity in mm/year
+- `Deformation`: cumulative LOS displacement in mm for the selected acquisition date
+- `Coherence`: unitless reliability from 0 to 1
 
-- Map rendering.
-- Leaflet integration.
-- Canvas raster rendering.
-- Pixel clicking.
-- File uploads.
-- Browser-based project folder picker.
-- Time-series visualization.
+The code prefers these NetCDF variables when available:
 
-## API endpoints
+- Velocity: `sbas_velocity_masked`, then `sbas_velocity_raw`
+- Deformation: `sbas_displacement_masked`, then `sbas_displacement_raw`
+- Coherence: `coherence_median`, then `coherence_mean`
+
+Raw variable names are used internally and are not presented as primary layer
+choices in the normal UI.
+
+## What This Version Can Do
+
+- Load a local processed project folder.
+- Select the best available NetCDF result file.
+- Render velocity, deformation, and coherence as pixel-based canvas maps.
+- Preserve the processed grid extent and resolution from `lat` and `lon`.
+- Switch deformation by acquisition date.
+- Apply an interactive coherence threshold to velocity and deformation maps.
+- Show a dynamic legend for the active product.
+- Click a map pixel to inspect latitude, longitude, velocity, coherence,
+  current deformation, and whether the pixel passes the current visual filter.
+- Plot a simple deformation time series for the selected pixel.
+
+## Important Caveats
+
+- LOS means line-of-sight motion relative to the satellite.
+- Positive and negative values depend on satellite viewing geometry.
+- Deformation is relative to the processing reference date or reference point.
+- Coherence indicates reliability; low-coherence pixels may be noisy.
+- The coherence threshold is only a visual filter. It does not modify, delete,
+  overwrite, or reprocess NetCDF data.
+
+## Not Implemented Yet
+
+- DEM map layer
+- RMSE map layer
+- Valid pixel mask layer
+- GeoTIFF viewer
+- Export tools
+- Advanced NetCDF browser
+- Scientific debug mode
+- Multi-layer overlay blending
+- Atmospheric/noise diagnostics
+- GNSS correction or absolute displacement calibration
+- User accounts
+- Report generation
+- Alerting
+- Drawing or editing AOIs
+
+## API Endpoints
 
 `GET /`
 
 Serves the main HTML page.
 
+`POST /api/project`
+
+Sets the current project folder for the local Flask process. Use an empty
+`project_path` to return to `data/project_D`.
+
 `GET /api/project-info`
 
-Returns project metadata, variables, coordinates, counts, and bounds.
+Returns selected file, grid counts, dates, product availability, and geographic
+bounds.
+
+`GET /api/map-data`
+
+Returns the core map products needed by the browser viewer: velocity,
+deformation, coherence, lat/lon axes, dates, bounds, and display ranges.
 
 `GET /api/layer-summary?layer=sbas_velocity_masked`
 
-Returns summary statistics for a selected 2D layer.
+Legacy inspection endpoint for basic 2D layer statistics.
 
 ## Troubleshooting
 
 If the UI shows an error, check that:
 
-- `data/project_D/` exists.
+- The project folder exists.
 - The folder contains at least one `.nc` file.
 - The NetCDF file can be opened by xarray/netCDF4.
 - The dataset contains `lat` and `lon` coordinates.
-- The selected layer exists and is 2D.
+- Velocity, deformation, and coherence products are present.

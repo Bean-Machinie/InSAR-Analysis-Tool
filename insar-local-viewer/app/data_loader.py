@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,10 @@ NETCDF_PRIORITY = [
     "results_aoi_masked.nc",
     "results_wide.nc",
 ]
+
+VELOCITY_CANDIDATES = ["sbas_velocity_masked", "sbas_velocity_raw"]
+DISPLACEMENT_CANDIDATES = ["sbas_displacement_masked", "sbas_displacement_raw"]
+COHERENCE_CANDIDATES = ["coherence_median", "coherence_mean"]
 
 
 class ProjectDataError(Exception):
@@ -42,32 +47,80 @@ def open_dataset(project_dir: Path):
         raise ProjectDataError(f"Invalid or unreadable NetCDF file: {selected_file}") from exc
 
 
-def get_coord_values(dataset, coord_name: str):
-    if coord_name not in dataset.coords:
-        raise ProjectDataError(f"Missing required coordinate: {coord_name}")
-    return dataset.coords[coord_name].values
-
-
 def get_project_info(project_dir: Path) -> dict:
     selected_file, dataset = open_dataset(project_dir)
     try:
-        lat = get_coord_values(dataset, "lat")
-        lon = get_coord_values(dataset, "lon")
-        dates = dataset.coords["date"].values if "date" in dataset.coords else []
+        lat = _coord_values(dataset, "lat")
+        lon = _coord_values(dataset, "lon")
+        dates = _date_strings(dataset)
+        products = _resolve_products(dataset)
+        metadata = _read_project_metadata(project_dir)
 
         return {
             "project_path": str(project_dir),
             "selected_file": str(selected_file),
-            "available_variables": sorted(list(dataset.data_vars)),
-            "coordinates": sorted(list(dataset.coords)),
+            "dataset_file": selected_file.name,
+            "products": {
+                "velocity": products["velocity"] is not None,
+                "deformation": products["deformation"] is not None,
+                "coherence": products["coherence"] is not None,
+            },
             "lat_count": int(lat.size),
             "lon_count": int(lon.size),
-            "date_count": int(np.asarray(dates).size),
-            "bounds": {
-                "lat_min": _finite_float(np.nanmin(lat)),
-                "lat_max": _finite_float(np.nanmax(lat)),
-                "lon_min": _finite_float(np.nanmin(lon)),
-                "lon_max": _finite_float(np.nanmax(lon)),
+            "date_count": int(len(dates)),
+            "dates": dates,
+            "bounds": _bounds(lat, lon),
+            "metadata": metadata,
+        }
+    finally:
+        dataset.close()
+
+
+def get_map_data(project_dir: Path) -> dict:
+    selected_file, dataset = open_dataset(project_dir)
+    try:
+        lat = _coord_values(dataset, "lat")
+        lon = _coord_values(dataset, "lon")
+        dates = _date_strings(dataset)
+        products = _resolve_products(dataset)
+
+        _require_product(products, "velocity")
+        _require_product(products, "deformation")
+        _require_product(products, "coherence")
+
+        velocity = _read_2d(dataset, products["velocity"])
+        coherence = _read_2d(dataset, products["coherence"])
+        displacement = _read_3d(dataset, products["deformation"])
+
+        return {
+            "project": {
+                "project_path": str(project_dir),
+                "selected_file": str(selected_file),
+                "dataset_file": selected_file.name,
+                "lat_count": int(lat.size),
+                "lon_count": int(lon.size),
+                "date_count": int(len(dates)),
+                "bounds": _bounds(lat, lon),
+            },
+            "dates": dates,
+            "lat": _axis_to_json(lat),
+            "lon": _axis_to_json(lon),
+            "layers": {
+                "velocity": {
+                    "values": _array_to_json(velocity),
+                    "range": _robust_range(velocity, center_zero=True),
+                    "unit": "mm/year",
+                },
+                "deformation": {
+                    "values": _array_to_json(displacement),
+                    "range": _robust_range(displacement, center_zero=True),
+                    "unit": "mm",
+                },
+                "coherence": {
+                    "values": _array_to_json(coherence),
+                    "range": {"min": 0.0, "max": 1.0, "p02": 0.0, "p98": 1.0},
+                    "unit": "unitless",
+                },
             },
         }
     finally:
@@ -119,6 +172,113 @@ def get_layer_summary(project_dir: Path, layer_name: str) -> dict:
         return summary
     finally:
         dataset.close()
+
+
+def _coord_values(dataset, coord_name: str):
+    if coord_name not in dataset.coords:
+        raise ProjectDataError(f"Missing required coordinate: {coord_name}")
+    values = np.asarray(dataset.coords[coord_name].values, dtype=float)
+    if values.ndim != 1 or values.size == 0:
+        raise ProjectDataError(f"Coordinate must be a non-empty 1D axis: {coord_name}")
+    return values
+
+
+def _date_strings(dataset):
+    if "date" not in dataset.coords:
+        return []
+    values = np.asarray(dataset.coords["date"].values)
+    return [np.datetime_as_string(value, unit="D") for value in values]
+
+
+def _resolve_products(dataset):
+    return {
+        "velocity": _first_existing_var(dataset, VELOCITY_CANDIDATES),
+        "deformation": _first_existing_var(dataset, DISPLACEMENT_CANDIDATES),
+        "coherence": _first_existing_var(dataset, COHERENCE_CANDIDATES),
+    }
+
+
+def _first_existing_var(dataset, names):
+    for name in names:
+        if name in dataset.data_vars:
+            return name
+    return None
+
+
+def _require_product(products, product_name):
+    if products[product_name] is None:
+        raise ProjectDataError(f"Required product is not available: {product_name}")
+
+
+def _read_2d(dataset, variable_name):
+    variable = dataset[variable_name]
+    if variable.ndim != 2 or set(variable.dims) != {"lat", "lon"}:
+        raise ProjectDataError(f"Expected {variable_name} to be a 2D lat/lon layer")
+    return np.asarray(variable.transpose("lat", "lon").values, dtype=float)
+
+
+def _read_3d(dataset, variable_name):
+    variable = dataset[variable_name]
+    if variable.ndim != 3 or set(variable.dims) != {"date", "lat", "lon"}:
+        raise ProjectDataError(f"Expected {variable_name} to be a 3D date/lat/lon layer")
+    return np.asarray(variable.transpose("date", "lat", "lon").values, dtype=float)
+
+
+def _bounds(lat, lon):
+    return {
+        "lat_min": _finite_float(np.nanmin(lat)),
+        "lat_max": _finite_float(np.nanmax(lat)),
+        "lon_min": _finite_float(np.nanmin(lon)),
+        "lon_max": _finite_float(np.nanmax(lon)),
+    }
+
+
+def _read_project_metadata(project_dir: Path):
+    metadata = {}
+    for filename in ["parameters.json", "manifest.json"]:
+        path = project_dir / filename
+        if not path.exists():
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as file:
+                metadata[filename] = json.load(file)
+        except Exception:
+            metadata[filename] = {"warning": "Metadata file could not be read"}
+    return metadata
+
+
+def _axis_to_json(values):
+    return [_finite_float(value) for value in values]
+
+
+def _array_to_json(values):
+    array = np.asarray(values, dtype=float)
+    if array.ndim == 2:
+        return [[_finite_float(value) for value in row] for row in array]
+    if array.ndim == 3:
+        return [[[_finite_float(value) for value in row] for row in plane] for plane in array]
+    raise ProjectDataError("Only 2D and 3D arrays can be serialized for map display")
+
+
+def _robust_range(values, center_zero=False):
+    array = np.asarray(values, dtype=float)
+    valid = array[np.isfinite(array)]
+    if valid.size == 0:
+        return {"min": None, "max": None, "p02": None, "p98": None}
+
+    p02 = float(np.nanpercentile(valid, 2))
+    p98 = float(np.nanpercentile(valid, 98))
+    if center_zero:
+        extent = max(abs(p02), abs(p98))
+        p02 = -extent
+        p98 = extent
+
+    return {
+        "min": _finite_float(np.nanmin(valid)),
+        "max": _finite_float(np.nanmax(valid)),
+        "p02": _finite_float(p02),
+        "p98": _finite_float(p98),
+    }
 
 
 def _finite_float(value):
