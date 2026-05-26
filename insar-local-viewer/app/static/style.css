@@ -390,7 +390,8 @@ button:active {
   font-family: Roboto, "Segoe UI", Arial, sans-serif;
 }
 
-.leaflet-image-layer {
+.leaflet-image-layer,
+.insar-raster-tile {
   image-rendering: pixelated;
 }
 

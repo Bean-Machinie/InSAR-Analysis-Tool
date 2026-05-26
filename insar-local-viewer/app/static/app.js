@@ -5,7 +5,9 @@ const state = {
   coherenceThreshold: 0.3,
   selectedPixel: null,
   map: null,
-  rasterOverlay: null,
+  rasterLayer: null,
+  rasterValues: null,
+  rasterRange: null,
   selectedMarker: null,
   hasFitProjectBounds: false,
 };
@@ -221,10 +223,18 @@ function initializeMap() {
   };
 
   state.map = L.map(els.map, {
+    fadeAnimation: true,
     zoomControl: true,
+    zoomAnimation: true,
     preferCanvas: true,
     layers: [baseLayers["Esri Satellite"]],
   });
+
+  state.map.createPane("insarRasterPane");
+  state.map.getPane("insarRasterPane").style.zIndex = 410;
+  state.map.getPane("insarRasterPane").style.pointerEvents = "none";
+  state.map.createPane("selectedPixelPane");
+  state.map.getPane("selectedPixelPane").style.zIndex = 720;
 
   L.control.layers(baseLayers, {}, { collapsed: false }).addTo(state.map);
   L.control.scale().addTo(state.map);
@@ -244,47 +254,10 @@ function drawMap() {
   state.map.invalidateSize();
   const values = getLayerValues();
   const range = getDisplayRange(values);
-  const coherence = state.data.layers.coherence.values;
-  const rows = values.length;
-  const cols = values[0].length;
-  const buffer = document.createElement("canvas");
-  buffer.width = cols;
-  buffer.height = rows;
-  const bufferContext = buffer.getContext("2d");
-  const image = bufferContext.createImageData(cols, rows);
-  const latAscending = state.data.lat[0] < state.data.lat[state.data.lat.length - 1];
-
-  for (let y = 0; y < rows; y += 1) {
-    const sourceY = latAscending ? rows - 1 - y : y;
-    for (let x = 0; x < cols; x += 1) {
-      const offset = (y * cols + x) * 4;
-      const value = values[sourceY][x];
-      const pixelCoherence = coherence[sourceY][x];
-      const hiddenByFilter = isFilterableLayer()
-        && (pixelCoherence === null || pixelCoherence < state.coherenceThreshold);
-      const color = hiddenByFilter || range.p02 === null
-        ? [0, 0, 0, 0]
-        : colorForValue(value, range, state.activeLayer);
-      image.data[offset] = color[0];
-      image.data[offset + 1] = color[1];
-      image.data[offset + 2] = color[2];
-      image.data[offset + 3] = color[3];
-    }
-  }
-
-  bufferContext.putImageData(image, 0, 0);
   const bounds = leafletBounds();
-  const imageUrl = buffer.toDataURL("image/png");
-
-  if (state.rasterOverlay) {
-    state.rasterOverlay.setUrl(imageUrl);
-    state.rasterOverlay.setBounds(bounds);
-  } else {
-    state.rasterOverlay = L.imageOverlay(imageUrl, bounds, {
-      opacity: 0.82,
-      interactive: false,
-    }).addTo(state.map);
-  }
+  state.rasterValues = values;
+  state.rasterRange = range;
+  updateRasterLayer();
 
   if (!state.hasFitProjectBounds) {
     state.map.fitBounds(bounds, { padding: [28, 28] });
@@ -305,6 +278,101 @@ function leafletBounds() {
   );
 }
 
+function updateRasterLayer() {
+  if (!state.map || !state.data || !state.rasterValues || !state.rasterRange) return;
+
+  if (!state.rasterLayer) {
+    state.rasterLayer = createRasterGridLayer();
+    state.rasterLayer.addTo(state.map);
+  } else {
+    state.rasterLayer.redraw();
+  }
+}
+
+function createRasterGridLayer() {
+  const RasterGridLayer = L.GridLayer.extend({
+    createTile(coords) {
+      const tile = document.createElement("canvas");
+      const tileSize = this.getTileSize();
+      tile.width = tileSize.x;
+      tile.height = tileSize.y;
+      tile.className = "insar-raster-tile";
+
+      const ctx = tile.getContext("2d");
+      ctx.imageSmoothingEnabled = false;
+      drawRasterTile(ctx, coords, tileSize);
+
+      return tile;
+    },
+  });
+
+  return new RasterGridLayer({
+    pane: "insarRasterPane",
+    tileSize: 256,
+    opacity: 1,
+    updateWhenIdle: false,
+    updateWhenZooming: true,
+    keepBuffer: 6,
+  });
+}
+
+function drawRasterTile(ctx, coords, tileSize) {
+  if (!state.data || !state.rasterValues || !state.rasterRange) return;
+  if (state.rasterRange.p02 === null && state.activeLayer !== "coherence") return;
+
+  const values = state.rasterValues;
+  const coherence = state.data.layers.coherence.values;
+  const latEdges = axisEdges(state.data.lat);
+  const lonEdges = axisEdges(state.data.lon);
+  const tileOrigin = L.point(coords.x * tileSize.x, coords.y * tileSize.y);
+  const tileBounds = L.bounds(tileOrigin, tileOrigin.add(tileSize));
+
+  for (let row = 0; row < values.length; row += 1) {
+    const south = Math.min(latEdges[row], latEdges[row + 1]);
+    const north = Math.max(latEdges[row], latEdges[row + 1]);
+
+    for (let col = 0; col < values[row].length; col += 1) {
+      const value = values[row][col];
+      const pixelCoherence = coherence[row][col];
+      const hiddenByFilter = isFilterableLayer()
+        && (pixelCoherence === null || pixelCoherence < state.coherenceThreshold);
+
+      if (hiddenByFilter || value === null || Number.isNaN(value)) continue;
+
+      const west = Math.min(lonEdges[col], lonEdges[col + 1]);
+      const east = Math.max(lonEdges[col], lonEdges[col + 1]);
+      const northWest = state.map.project([north, west], coords.z);
+      const southEast = state.map.project([south, east], coords.z);
+      const cellBounds = L.bounds(northWest, southEast);
+
+      if (!tileBounds.intersects(cellBounds)) continue;
+
+      const x = Math.floor(northWest.x - tileOrigin.x);
+      const y = Math.floor(northWest.y - tileOrigin.y);
+      const width = Math.max(1, Math.ceil(southEast.x - northWest.x));
+      const height = Math.max(1, Math.ceil(southEast.y - northWest.y));
+      const color = colorForValue(value, state.rasterRange, state.activeLayer);
+
+      ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
+      ctx.fillRect(x, y, width, height);
+    }
+  }
+}
+
+function axisEdges(values) {
+  const edges = [];
+  for (let index = 0; index <= values.length; index += 1) {
+    if (index === 0) {
+      edges.push(values[0] - (values[1] - values[0]) / 2);
+    } else if (index === values.length) {
+      edges.push(values[values.length - 1] + (values[values.length - 1] - values[values.length - 2]) / 2);
+    } else {
+      edges.push((values[index - 1] + values[index]) / 2);
+    }
+  }
+  return edges;
+}
+
 function drawSelectedPixel() {
   if (!state.selectedPixel) return;
   const { row, col } = state.selectedPixel;
@@ -313,6 +381,7 @@ function drawSelectedPixel() {
     state.selectedMarker = L.circleMarker(latLng, {
       radius: 7,
       color: "#ffffff",
+      pane: "selectedPixelPane",
       weight: 3,
       fillColor: "#111827",
       fillOpacity: 0.9,
@@ -600,9 +669,11 @@ window.addEventListener("resize", () => {
 
 function resetMapLayers() {
   state.hasFitProjectBounds = false;
-  if (state.rasterOverlay) {
-    state.rasterOverlay.remove();
-    state.rasterOverlay = null;
+  state.rasterValues = null;
+  state.rasterRange = null;
+  if (state.rasterLayer) {
+    state.rasterLayer.remove();
+    state.rasterLayer = null;
   }
   if (state.selectedMarker) {
     state.selectedMarker.remove();
