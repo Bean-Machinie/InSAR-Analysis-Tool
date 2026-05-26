@@ -99,10 +99,11 @@ The viewer keeps the main UI limited to:
 - `Deformation`: cumulative LOS displacement in mm for the selected acquisition date
 - `Coherence`: unitless reliability from 0 to 1
 
-The code prefers these NetCDF variables when available:
+The code prefers raw result variables for display, then applies coherence
+filtering visually in the browser:
 
-- Velocity: `sbas_velocity_masked`, then `sbas_velocity_raw`
-- Deformation: `sbas_displacement_masked`, then `sbas_displacement_raw`
+- Velocity: `sbas_velocity_raw`, then `sbas_velocity_masked`
+- Deformation: `sbas_displacement_raw`, then `sbas_displacement_masked`
 - Coherence: `coherence_median`, then `coherence_mean`
 
 Raw variable names are used internally and are not presented as primary layer

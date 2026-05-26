@@ -11,8 +11,8 @@ NETCDF_PRIORITY = [
     "results_wide.nc",
 ]
 
-VELOCITY_CANDIDATES = ["sbas_velocity_masked", "sbas_velocity_raw"]
-DISPLACEMENT_CANDIDATES = ["sbas_displacement_masked", "sbas_displacement_raw"]
+VELOCITY_CANDIDATES = ["sbas_velocity_raw", "sbas_velocity_masked"]
+DISPLACEMENT_CANDIDATES = ["sbas_displacement_raw", "sbas_displacement_masked"]
 COHERENCE_CANDIDATES = ["coherence_median", "coherence_mean"]
 
 
