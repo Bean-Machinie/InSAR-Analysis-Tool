@@ -104,8 +104,8 @@ input {
 }
 
 .app-shell {
-  min-height: 100vh;
-  padding: 18px;
+  min-height: calc(100vh - 42px);
+  padding: 10px 12px 12px;
 }
 
 .topbar {
@@ -113,19 +113,19 @@ input {
   display: grid;
   gap: 18px;
   grid-template-columns: 1fr;
-  margin: 0 auto 12px;
-  max-width: 1540px;
+  margin: 0 auto 8px;
+  max-width: none;
 }
 
 .topbar h1 {
-  font-size: 1.8rem;
+  font-size: 1.45rem;
   line-height: 1.1;
   margin: 0;
 }
 
 .topbar p {
   color: var(--muted);
-  margin: 6px 0 0;
+  margin: 3px 0 0;
 }
 
 .panel label {
@@ -157,8 +157,8 @@ button:hover {
 
 .status {
   color: var(--muted);
-  margin: 0 auto 12px;
-  max-width: 1540px;
+  margin: 0 auto 8px;
+  max-width: none;
   min-height: 24px;
 }
 
@@ -172,10 +172,10 @@ button:hover {
 
 .viewer-grid {
   display: grid;
-  gap: 14px;
-  grid-template-columns: 300px minmax(480px, 1fr) 330px;
+  gap: 10px;
+  grid-template-columns: 270px minmax(640px, 1fr) 300px;
   margin: 0 auto;
-  max-width: 1540px;
+  max-width: none;
 }
 
 .sidebar,
@@ -256,8 +256,8 @@ dd {
 
 .map-panel {
   display: grid;
-  grid-template-rows: auto minmax(420px, 1fr) auto;
-  min-height: 720px;
+  grid-template-rows: auto minmax(620px, 1fr) auto;
+  min-height: calc(100vh - 132px);
   overflow: hidden;
 }
 
@@ -286,11 +286,22 @@ dd {
   position: relative;
 }
 
-#map-canvas {
+#map {
   display: block;
   height: 100%;
-  min-height: 560px;
+  min-height: 620px;
   width: 100%;
+}
+
+.leaflet-image-layer {
+  image-rendering: pixelated;
+}
+
+.leaflet-control-layers {
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--shadow) !important;
+  font: 0.9rem Arial, Helvetica, sans-serif;
 }
 
 .map-placeholder {
@@ -384,7 +395,7 @@ dd {
     min-height: 600px;
   }
 
-  #map-canvas {
+  #map {
     min-height: 430px;
   }
 }

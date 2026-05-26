@@ -4,6 +4,10 @@ const state = {
   dateIndex: 0,
   coherenceThreshold: 0.3,
   selectedPixel: null,
+  map: null,
+  rasterOverlay: null,
+  selectedMarker: null,
+  hasFitProjectBounds: false,
 };
 
 const els = {
@@ -30,7 +34,7 @@ const els = {
   legendMid: document.querySelector("#legend-mid"),
   legendMax: document.querySelector("#legend-max"),
   activeLayerTitle: document.querySelector("#active-layer-title"),
-  mapCanvas: document.querySelector("#map-canvas"),
+  map: document.querySelector("#map"),
   mapPlaceholder: document.querySelector("#map-placeholder"),
   lonRange: document.querySelector("#lon-range"),
   latRange: document.querySelector("#lat-range"),
@@ -194,10 +198,42 @@ function resizeCanvasToDisplaySize(canvas) {
   }
 }
 
+function initializeMap() {
+  if (state.map || typeof L === "undefined") return;
+
+  const baseLayers = {
+    "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }),
+    "Carto Light": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+      maxZoom: 20,
+      attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+      subdomains: "abcd",
+    }),
+    "Esri Satellite": L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      {
+        maxZoom: 18,
+        attribution: "Esri",
+      },
+    ),
+  };
+
+  state.map = L.map(els.map, {
+    zoomControl: true,
+    preferCanvas: true,
+    layers: [baseLayers["Esri Satellite"]],
+  });
+
+  L.control.layers(baseLayers, {}, { collapsed: false }).addTo(state.map);
+  L.control.scale().addTo(state.map);
+  state.map.setView([0, 0], 2);
+  state.map.on("click", handleLeafletMapClick);
+}
+
 function drawMap() {
-  resizeCanvasToDisplaySize(els.mapCanvas);
-  const ctx = els.mapCanvas.getContext("2d");
-  ctx.clearRect(0, 0, els.mapCanvas.width, els.mapCanvas.height);
+  initializeMap();
 
   if (!state.data) {
     els.mapPlaceholder.hidden = false;
@@ -205,18 +241,25 @@ function drawMap() {
   }
 
   els.mapPlaceholder.hidden = true;
+  state.map.invalidateSize();
   const values = getLayerValues();
   const range = getDisplayRange(values);
   const coherence = state.data.layers.coherence.values;
   const rows = values.length;
   const cols = values[0].length;
-  const image = ctx.createImageData(cols, rows);
+  const buffer = document.createElement("canvas");
+  buffer.width = cols;
+  buffer.height = rows;
+  const bufferContext = buffer.getContext("2d");
+  const image = bufferContext.createImageData(cols, rows);
+  const latAscending = state.data.lat[0] < state.data.lat[state.data.lat.length - 1];
 
   for (let y = 0; y < rows; y += 1) {
+    const sourceY = latAscending ? rows - 1 - y : y;
     for (let x = 0; x < cols; x += 1) {
       const offset = (y * cols + x) * 4;
-      const value = values[y][x];
-      const pixelCoherence = coherence[y][x];
+      const value = values[sourceY][x];
+      const pixelCoherence = coherence[sourceY][x];
       const hiddenByFilter = isFilterableLayer()
         && (pixelCoherence === null || pixelCoherence < state.coherenceThreshold);
       const color = hiddenByFilter || range.p02 === null
@@ -229,80 +272,78 @@ function drawMap() {
     }
   }
 
-  const buffer = document.createElement("canvas");
-  buffer.width = cols;
-  buffer.height = rows;
-  buffer.getContext("2d").putImageData(image, 0, 0);
+  bufferContext.putImageData(image, 0, 0);
+  const bounds = leafletBounds();
+  const imageUrl = buffer.toDataURL("image/png");
 
-  const mapRect = mapDrawRect(rows, cols);
-  ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = "#eef1f4";
-  ctx.fillRect(0, 0, els.mapCanvas.width, els.mapCanvas.height);
-  ctx.drawImage(buffer, mapRect.x, mapRect.y, mapRect.width, mapRect.height);
-  ctx.strokeStyle = "#17202a";
-  ctx.lineWidth = Math.max(1, window.devicePixelRatio || 1);
-  ctx.strokeRect(mapRect.x, mapRect.y, mapRect.width, mapRect.height);
+  if (state.rasterOverlay) {
+    state.rasterOverlay.setUrl(imageUrl);
+    state.rasterOverlay.setBounds(bounds);
+  } else {
+    state.rasterOverlay = L.imageOverlay(imageUrl, bounds, {
+      opacity: 0.82,
+      interactive: false,
+    }).addTo(state.map);
+  }
 
-  drawSelectedPixel(ctx, mapRect, rows, cols);
+  if (!state.hasFitProjectBounds) {
+    state.map.fitBounds(bounds, { padding: [28, 28] });
+    state.hasFitProjectBounds = true;
+  }
+
+  drawSelectedPixel();
   updateMapLabels();
   updateLegend();
   updatePixelInfo();
 }
 
-function mapDrawRect(rows, cols) {
-  const padding = 24 * (window.devicePixelRatio || 1);
-  const availableWidth = els.mapCanvas.width - padding * 2;
-  const availableHeight = els.mapCanvas.height - padding * 2;
-  const scale = Math.min(availableWidth / cols, availableHeight / rows);
-  const width = cols * scale;
-  const height = rows * scale;
-  return {
-    x: (els.mapCanvas.width - width) / 2,
-    y: (els.mapCanvas.height - height) / 2,
-    width,
-    height,
-  };
+function leafletBounds() {
+  const bounds = getBounds();
+  return L.latLngBounds(
+    [bounds.lat_min, bounds.lon_min],
+    [bounds.lat_max, bounds.lon_max],
+  );
 }
 
-function drawSelectedPixel(ctx, mapRect, rows, cols) {
+function drawSelectedPixel() {
   if (!state.selectedPixel) return;
   const { row, col } = state.selectedPixel;
-  const x = mapRect.x + (col + 0.5) * (mapRect.width / cols);
-  const y = mapRect.y + (row + 0.5) * (mapRect.height / rows);
-  const radius = Math.max(5, 7 * (window.devicePixelRatio || 1));
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.strokeStyle = "#111827";
-  ctx.lineWidth = Math.max(2, 2 * (window.devicePixelRatio || 1));
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(x, y, radius + 3, 0, Math.PI * 2);
-  ctx.strokeStyle = "#ffffff";
-  ctx.stroke();
+  const latLng = [state.data.lat[row], state.data.lon[col]];
+  if (!state.selectedMarker) {
+    state.selectedMarker = L.circleMarker(latLng, {
+      radius: 7,
+      color: "#ffffff",
+      weight: 3,
+      fillColor: "#111827",
+      fillOpacity: 0.9,
+    }).addTo(state.map);
+  } else {
+    state.selectedMarker.setLatLng(latLng);
+  }
 }
 
-function handleMapClick(event) {
+function handleLeafletMapClick(event) {
   if (!state.data) return;
-  const rect = els.mapCanvas.getBoundingClientRect();
-  const ratio = window.devicePixelRatio || 1;
-  const x = (event.clientX - rect.left) * ratio;
-  const y = (event.clientY - rect.top) * ratio;
-  const rows = state.data.lat.length;
-  const cols = state.data.lon.length;
-  const mapRect = mapDrawRect(rows, cols);
+  if (!leafletBounds().contains(event.latlng)) return;
 
-  if (
-    x < mapRect.x || x > mapRect.x + mapRect.width ||
-    y < mapRect.y || y > mapRect.y + mapRect.height
-  ) {
-    return;
-  }
-
-  const col = clamp(Math.floor(((x - mapRect.x) / mapRect.width) * cols), 0, cols - 1);
-  const row = clamp(Math.floor(((y - mapRect.y) / mapRect.height) * rows), 0, rows - 1);
+  const row = nearestIndex(state.data.lat, event.latlng.lat);
+  const col = nearestIndex(state.data.lon, event.latlng.lng);
   state.selectedPixel = { row, col };
   drawMap();
   drawTimeSeries();
+}
+
+function nearestIndex(values, target) {
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  values.forEach((value, index) => {
+    const distance = Math.abs(value - target);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
 }
 
 function updateMapLabels() {
@@ -468,6 +509,7 @@ async function loadProject(projectPath = "") {
     state.data = await fetchJson("/api/map-data");
     state.dateIndex = 0;
     state.selectedPixel = null;
+    resetMapLayers();
     renderDatasetDetails();
     updateControls();
     drawMap();
@@ -499,6 +541,7 @@ async function openProjectFromFolderPicker() {
     state.data = await fetchJson("/api/map-data");
     state.dateIndex = 0;
     state.selectedPixel = null;
+    resetMapLayers();
     renderDatasetDetails();
     updateControls();
     drawMap();
@@ -550,11 +593,22 @@ els.coherenceSlider.addEventListener("input", () => {
   drawMap();
 });
 
-els.mapCanvas.addEventListener("click", handleMapClick);
 window.addEventListener("resize", () => {
   drawMap();
   drawTimeSeries();
 });
+
+function resetMapLayers() {
+  state.hasFitProjectBounds = false;
+  if (state.rasterOverlay) {
+    state.rasterOverlay.remove();
+    state.rasterOverlay = null;
+  }
+  if (state.selectedMarker) {
+    state.selectedMarker.remove();
+    state.selectedMarker = null;
+  }
+}
 
 updateControls();
 drawMap();
