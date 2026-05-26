@@ -391,7 +391,8 @@ button:active {
 }
 
 .leaflet-image-layer,
-.insar-raster-tile {
+.insar-raster-tile,
+.selected-pixel-tile {
   image-rendering: pixelated;
 }
 

@@ -8,7 +8,7 @@ const state = {
   rasterLayer: null,
   rasterValues: null,
   rasterRange: null,
-  selectedMarker: null,
+  selectedPixelLayer: null,
   hasFitProjectBounds: false,
 };
 
@@ -347,14 +347,19 @@ function drawRasterTile(ctx, coords, tileSize) {
 
       if (!tileBounds.intersects(cellBounds)) continue;
 
-      const x = Math.floor(northWest.x - tileOrigin.x);
-      const y = Math.floor(northWest.y - tileOrigin.y);
-      const width = Math.max(1, Math.ceil(southEast.x - northWest.x));
-      const height = Math.max(1, Math.ceil(southEast.y - northWest.y));
+      const x = northWest.x - tileOrigin.x;
+      const y = northWest.y - tileOrigin.y;
+      const width = Math.max(1, southEast.x - northWest.x);
+      const height = Math.max(1, southEast.y - northWest.y);
+      const radius = Math.max(1, Math.min(width, height) * 0.48);
+      const centerX = x + width / 2;
+      const centerY = y + height / 2;
       const color = colorForValue(value, state.rasterRange, state.activeLayer);
 
       ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
-      ctx.fillRect(x, y, width, height);
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 }
@@ -375,20 +380,78 @@ function axisEdges(values) {
 
 function drawSelectedPixel() {
   if (!state.selectedPixel) return;
-  const { row, col } = state.selectedPixel;
-  const latLng = [state.data.lat[row], state.data.lon[col]];
-  if (!state.selectedMarker) {
-    state.selectedMarker = L.circleMarker(latLng, {
-      radius: 7,
-      color: "#ffffff",
-      pane: "selectedPixelPane",
-      weight: 3,
-      fillColor: "#111827",
-      fillOpacity: 0.9,
-    }).addTo(state.map);
+  if (!state.selectedPixelLayer) {
+    state.selectedPixelLayer = createSelectedPixelLayer();
+    state.selectedPixelLayer.addTo(state.map);
   } else {
-    state.selectedMarker.setLatLng(latLng);
+    state.selectedPixelLayer.redraw();
   }
+}
+
+function createSelectedPixelLayer() {
+  const SelectedPixelLayer = L.GridLayer.extend({
+    createTile(coords) {
+      const tile = document.createElement("canvas");
+      const tileSize = this.getTileSize();
+      tile.width = tileSize.x;
+      tile.height = tileSize.y;
+      tile.className = "selected-pixel-tile";
+
+      const ctx = tile.getContext("2d");
+      ctx.imageSmoothingEnabled = false;
+      drawSelectedPixelTile(ctx, coords, tileSize);
+
+      return tile;
+    },
+  });
+
+  return new SelectedPixelLayer({
+    pane: "selectedPixelPane",
+    tileSize: 256,
+    updateWhenIdle: false,
+    updateWhenZooming: true,
+    keepBuffer: 6,
+  });
+}
+
+function drawSelectedPixelTile(ctx, coords, tileSize) {
+  if (!state.data || !state.selectedPixel) return;
+
+  const { row, col } = state.selectedPixel;
+  const latEdges = axisEdges(state.data.lat);
+  const lonEdges = axisEdges(state.data.lon);
+  const south = Math.min(latEdges[row], latEdges[row + 1]);
+  const north = Math.max(latEdges[row], latEdges[row + 1]);
+  const west = Math.min(lonEdges[col], lonEdges[col + 1]);
+  const east = Math.max(lonEdges[col], lonEdges[col + 1]);
+  const tileOrigin = L.point(coords.x * tileSize.x, coords.y * tileSize.y);
+  const tileBounds = L.bounds(tileOrigin, tileOrigin.add(tileSize));
+  const northWest = state.map.project([north, west], coords.z);
+  const southEast = state.map.project([south, east], coords.z);
+  const cellBounds = L.bounds(northWest, southEast);
+
+  if (!tileBounds.intersects(cellBounds)) return;
+
+  const x = northWest.x - tileOrigin.x;
+  const y = northWest.y - tileOrigin.y;
+  const width = Math.max(1, southEast.x - northWest.x);
+  const height = Math.max(1, southEast.y - northWest.y);
+  const radius = Math.max(1, Math.min(width, height) * 0.48);
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const ringWidth = Math.max(2, Math.min(4, radius * 0.42));
+
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius + ringWidth * 0.8, 0, Math.PI * 2);
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = ringWidth + 2;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius + ringWidth * 0.8, 0, Math.PI * 2);
+  ctx.strokeStyle = "#fcd900";
+  ctx.lineWidth = ringWidth;
+  ctx.stroke();
 }
 
 function handleLeafletMapClick(event) {
@@ -398,7 +461,8 @@ function handleLeafletMapClick(event) {
   const row = nearestIndex(state.data.lat, event.latlng.lat);
   const col = nearestIndex(state.data.lon, event.latlng.lng);
   state.selectedPixel = { row, col };
-  drawMap();
+  drawSelectedPixel();
+  updatePixelInfo();
   drawTimeSeries();
 }
 
@@ -675,9 +739,9 @@ function resetMapLayers() {
     state.rasterLayer.remove();
     state.rasterLayer = null;
   }
-  if (state.selectedMarker) {
-    state.selectedMarker.remove();
-    state.selectedMarker = null;
+  if (state.selectedPixelLayer) {
+    state.selectedPixelLayer.remove();
+    state.selectedPixelLayer = null;
   }
 }
 
