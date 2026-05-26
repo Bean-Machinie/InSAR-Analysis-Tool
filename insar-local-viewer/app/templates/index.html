@@ -25,13 +25,6 @@
           <h1>InSAR Local Viewer</h1>
           <p>Velocity, deformation, and coherence inspection for processed SBAS results.</p>
         </div>
-        <div class="open-card">
-          <div>
-            <strong>Open a processed project folder</strong>
-            <span>Use File &gt; Open Project... to select a folder on this computer.</span>
-          </div>
-          <button id="hero-open-project-button" type="button">Open Project...</button>
-        </div>
       </header>
 
       <section id="status" class="status" aria-live="polite"></section>
@@ -77,7 +70,6 @@
             <label for="coherence-slider">Visual threshold</label>
             <input id="coherence-slider" type="range" min="0" max="1" value="0.3" step="0.01">
             <div class="control-value">Coherence filter: >= <span id="coherence-value">0.30</span></div>
-            <p class="note">Pixels below the threshold are hidden only in this viewer. The NetCDF data is not changed.</p>
           </section>
 
           <section class="panel">
@@ -89,7 +81,6 @@
               <span id="legend-mid">0</span>
               <span id="legend-max">-</span>
             </div>
-            <p id="legend-copy" class="note"></p>
           </section>
         </aside>
 
@@ -97,7 +88,6 @@
           <div class="map-header">
             <div>
               <h2 id="active-layer-title">Velocity</h2>
-              <p id="active-layer-copy">LOS velocity is motion in the satellite line-of-sight direction, not direct vertical ground motion.</p>
             </div>
             <div id="active-filter-badge" class="filter-badge">Filter active: >= 0.30</div>
           </div>
@@ -145,13 +135,6 @@
           <section class="panel">
             <h2>Pixel Time Series</h2>
             <canvas id="timeseries-canvas" width="360" height="220"></canvas>
-            <p class="note">Cumulative LOS displacement is relative to the processing reference date or reference point. Missing values are shown as gaps.</p>
-          </section>
-
-          <section class="panel guidance">
-            <h2>Guidance</h2>
-            <p>LOS means line-of-sight motion relative to the satellite. Positive and negative values depend on the satellite viewing geometry.</p>
-            <p>Coherence indicates reliability. Lower coherence pixels may be noisy or unreliable.</p>
           </section>
         </aside>
       </section>

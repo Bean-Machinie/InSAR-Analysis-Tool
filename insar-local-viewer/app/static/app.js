@@ -11,7 +11,6 @@ const els = {
   fileMenu: document.querySelector("#file-menu"),
   openProjectButton: document.querySelector("#open-project-button"),
   reloadProjectButton: document.querySelector("#reload-project-button"),
-  heroOpenProjectButton: document.querySelector("#hero-open-project-button"),
   currentProjectLabel: document.querySelector("#current-project-label"),
   status: document.querySelector("#status"),
   datasetFile: document.querySelector("#dataset-file"),
@@ -30,9 +29,7 @@ const els = {
   legendMin: document.querySelector("#legend-min"),
   legendMid: document.querySelector("#legend-mid"),
   legendMax: document.querySelector("#legend-max"),
-  legendCopy: document.querySelector("#legend-copy"),
   activeLayerTitle: document.querySelector("#active-layer-title"),
-  activeLayerCopy: document.querySelector("#active-layer-copy"),
   mapCanvas: document.querySelector("#map-canvas"),
   mapPlaceholder: document.querySelector("#map-placeholder"),
   lonRange: document.querySelector("#lon-range"),
@@ -47,21 +44,9 @@ const els = {
 };
 
 const layerText = {
-  velocity: {
-    title: "Velocity",
-    copy: "LOS velocity is motion in the satellite line-of-sight direction, not direct vertical ground motion.",
-    legend: "Diverging scale centred on zero. Negative and positive LOS motion depend on satellite viewing geometry.",
-  },
-  deformation: {
-    title: "Deformation",
-    copy: "Cumulative LOS displacement is relative to the processing reference date or reference point.",
-    legend: "Diverging scale centred on zero for the selected acquisition date. The first date is a temporal reference, not absolute ground motion.",
-  },
-  coherence: {
-    title: "Coherence",
-    copy: "Coherence is a reliability layer. Higher coherence means more reliable deformation information.",
-    legend: "Unitless reliability from 0 to 1. Low coherence is less reliable; high coherence is more reliable.",
-  },
+  velocity: { title: "Velocity" },
+  deformation: { title: "Deformation" },
+  coherence: { title: "Coherence" },
 };
 
 async function fetchJson(url, options = {}) {
@@ -100,6 +85,57 @@ function getLayerRange() {
   if (state.activeLayer === "velocity") return state.data.layers.velocity.range;
   if (state.activeLayer === "coherence") return state.data.layers.coherence.range;
   return state.data.layers.deformation.range;
+}
+
+function getDisplayRange(values = getLayerValues()) {
+  if (!state.data) return getLayerRange();
+  if (state.activeLayer === "coherence") {
+    return state.data.layers.coherence.range;
+  }
+
+  const coherence = state.data.layers.coherence.values;
+  const visibleValues = [];
+
+  for (let y = 0; y < values.length; y += 1) {
+    for (let x = 0; x < values[y].length; x += 1) {
+      const value = values[y][x];
+      const pixelCoherence = coherence[y][x];
+      if (
+        value !== null
+        && !Number.isNaN(value)
+        && pixelCoherence !== null
+        && pixelCoherence >= state.coherenceThreshold
+      ) {
+        visibleValues.push(value);
+      }
+    }
+  }
+
+  if (!visibleValues.length) {
+    return { min: null, max: null, p02: null, p98: null };
+  }
+
+  visibleValues.sort((a, b) => a - b);
+  const p02 = percentile(visibleValues, 2);
+  const p98 = percentile(visibleValues, 98);
+  const extent = Math.max(Math.abs(p02), Math.abs(p98), 0.000001);
+
+  return {
+    min: visibleValues[0],
+    max: visibleValues[visibleValues.length - 1],
+    p02: -extent,
+    p98: extent,
+  };
+}
+
+function percentile(sortedValues, percentileValue) {
+  if (!sortedValues.length) return null;
+  const index = (percentileValue / 100) * (sortedValues.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sortedValues[lower];
+  const weight = index - lower;
+  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
 }
 
 function isFilterableLayer() {
@@ -170,7 +206,7 @@ function drawMap() {
 
   els.mapPlaceholder.hidden = true;
   const values = getLayerValues();
-  const range = getLayerRange();
+  const range = getDisplayRange(values);
   const coherence = state.data.layers.coherence.values;
   const rows = values.length;
   const cols = values[0].length;
@@ -183,7 +219,9 @@ function drawMap() {
       const pixelCoherence = coherence[y][x];
       const hiddenByFilter = isFilterableLayer()
         && (pixelCoherence === null || pixelCoherence < state.coherenceThreshold);
-      const color = hiddenByFilter ? [0, 0, 0, 0] : colorForValue(value, range, state.activeLayer);
+      const color = hiddenByFilter || range.p02 === null
+        ? [0, 0, 0, 0]
+        : colorForValue(value, range, state.activeLayer);
       image.data[offset] = color[0];
       image.data[offset + 1] = color[1];
       image.data[offset + 2] = color[2];
@@ -291,14 +329,12 @@ function updateControls() {
   }
 
   els.activeLayerTitle.textContent = layerText[state.activeLayer].title;
-  els.activeLayerCopy.textContent = layerText[state.activeLayer].copy;
 }
 
 function updateLegend() {
   if (!state.data) return;
-  const range = getLayerRange();
+  const range = getDisplayRange();
   els.legendTitle.textContent = layerText[state.activeLayer].title;
-  els.legendCopy.textContent = layerText[state.activeLayer].legend;
 
   if (state.activeLayer === "coherence") {
     els.legendBar.style.background = "linear-gradient(90deg, rgb(31,41,55), rgb(32,139,117), rgb(250,204,21))";
@@ -310,9 +346,9 @@ function updateLegend() {
 
   const unit = state.activeLayer === "velocity" ? "mm/year" : "mm";
   els.legendBar.style.background = "linear-gradient(90deg, rgb(40,89,173), rgb(246,247,240), rgb(190,54,45))";
-  els.legendMin.textContent = `${formatNumber(range.p02)} ${unit}`;
+  els.legendMin.textContent = range.p02 === null ? `No visible pixels` : `${formatNumber(range.p02)} ${unit}`;
   els.legendMid.textContent = "0";
-  els.legendMax.textContent = `${formatNumber(range.p98)} ${unit}`;
+  els.legendMax.textContent = range.p98 === null ? "" : `${formatNumber(range.p98)} ${unit}`;
 }
 
 function updatePixelInfo() {
@@ -409,9 +445,14 @@ function renderDatasetDetails() {
   const project = state.data.project;
   const bounds = project.bounds;
   els.datasetFile.textContent = project.dataset_file;
-  els.currentProjectLabel.textContent = project.project_path;
+  els.currentProjectLabel.textContent = `Project: ${projectFolderName(project.project_path)}`;
   els.gridDetails.textContent = `${project.lat_count} rows x ${project.lon_count} columns, ${project.date_count} dates`;
   els.boundsDetails.textContent = `${formatNumber(bounds.lat_min, 5)} to ${formatNumber(bounds.lat_max, 5)} lat; ${formatNumber(bounds.lon_min, 5)} to ${formatNumber(bounds.lon_max, 5)} lon`;
+}
+
+function projectFolderName(projectPath) {
+  const parts = String(projectPath).split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] || "Loaded project";
 }
 
 async function loadProject(projectPath = "") {
@@ -482,7 +523,6 @@ document.addEventListener("click", (event) => {
 });
 
 els.openProjectButton.addEventListener("click", openProjectFromFolderPicker);
-els.heroOpenProjectButton.addEventListener("click", openProjectFromFolderPicker);
 els.reloadProjectButton.addEventListener("click", () => {
   setMenuOpen(false);
   loadProject("__CURRENT__");
@@ -519,4 +559,4 @@ window.addEventListener("resize", () => {
 updateControls();
 drawMap();
 drawTimeSeries();
-setStatus("Use File > Open Project... to select a processed InSAR project folder.");
+setStatus("");

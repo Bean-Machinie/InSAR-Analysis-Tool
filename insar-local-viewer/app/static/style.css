@@ -112,7 +112,7 @@ input {
   align-items: end;
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(280px, 1fr) minmax(320px, 520px);
+  grid-template-columns: 1fr;
   margin: 0 auto 12px;
   max-width: 1540px;
 }
@@ -138,24 +138,6 @@ input {
 
 .panel input[type="range"] {
   width: 100%;
-}
-
-.open-card {
-  align-items: center;
-  background: #ffffff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 12px;
-}
-
-.open-card span {
-  color: var(--muted);
-  display: block;
-  font-size: 0.9rem;
-  margin-top: 2px;
 }
 
 button {
@@ -280,17 +262,12 @@ dd {
 }
 
 .map-header {
-  align-items: start;
+  align-items: center;
   border-bottom: 1px solid var(--border);
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) auto;
   padding: 16px;
-}
-
-.map-header p {
-  color: var(--muted);
-  margin: 0;
 }
 
 .filter-badge {
@@ -373,15 +350,6 @@ dd {
   width: 100%;
 }
 
-.guidance p {
-  color: var(--muted);
-  margin: 0 0 10px;
-}
-
-.guidance p:last-child {
-  margin-bottom: 0;
-}
-
 [hidden] {
   display: none !important;
 }
@@ -408,7 +376,6 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  .open-card,
   .map-header {
     grid-template-columns: 1fr;
   }
