@@ -36,6 +36,7 @@ const els = {
   legendMid: document.querySelector("#legend-mid"),
   legendMax: document.querySelector("#legend-max"),
   activeLayerTitle: document.querySelector("#active-layer-title"),
+  mapFrame: document.querySelector("#map-frame"),
   map: document.querySelector("#map"),
   mapPlaceholder: document.querySelector("#map-placeholder"),
   lonRange: document.querySelector("#lon-range"),
@@ -46,6 +47,11 @@ const els = {
   pixelCoherence: document.querySelector("#pixel-coherence"),
   pixelDeformation: document.querySelector("#pixel-deformation"),
   pixelPasses: document.querySelector("#pixel-passes"),
+  pixelPanel: document.querySelector("#pixel-panel"),
+  pixelPanelHeader: document.querySelector("#pixel-panel-header"),
+  pixelPanelMinimize: document.querySelector("#pixel-panel-minimize"),
+  pixelPanelResize: document.querySelector("#pixel-panel-resize"),
+  pixelPanelSubtitle: document.querySelector("#pixel-panel-subtitle"),
   timeseriesCanvas: document.querySelector("#timeseries-canvas"),
 };
 
@@ -461,6 +467,7 @@ function handleLeafletMapClick(event) {
   const row = nearestIndex(state.data.lat, event.latlng.lat);
   const col = nearestIndex(state.data.lon, event.latlng.lng);
   state.selectedPixel = { row, col };
+  showPixelPanel();
   drawSelectedPixel();
   updatePixelInfo();
   drawTimeSeries();
@@ -526,7 +533,10 @@ function updateLegend() {
 }
 
 function updatePixelInfo() {
-  if (!state.data || !state.selectedPixel) return;
+  if (!state.data || !state.selectedPixel) {
+    resetPixelInfo();
+    return;
+  }
   const { row, col } = state.selectedPixel;
   const velocity = state.data.layers.velocity.values[row][col];
   const coherence = state.data.layers.coherence.values[row][col];
@@ -539,6 +549,17 @@ function updatePixelInfo() {
   els.pixelCoherence.textContent = formatNumber(coherence, 2);
   els.pixelDeformation.textContent = `${formatNumber(deformation)} mm`;
   els.pixelPasses.textContent = isFilterableLayer() ? (passes ? "Yes" : "No") : "Not applied";
+  els.pixelPanelSubtitle.textContent = `${formatNumber(state.data.lat[row], 5)}, ${formatNumber(state.data.lon[col], 5)}`;
+}
+
+function resetPixelInfo() {
+  els.pixelLat.textContent = "Click the map";
+  els.pixelLon.textContent = "Click the map";
+  els.pixelVelocity.textContent = "-";
+  els.pixelCoherence.textContent = "-";
+  els.pixelDeformation.textContent = "-";
+  els.pixelPasses.textContent = "-";
+  els.pixelPanelSubtitle.textContent = "No point selected";
 }
 
 function drawTimeSeries() {
@@ -642,6 +663,7 @@ async function loadProject(projectPath = "") {
     state.data = await fetchJson("/api/map-data");
     state.dateIndex = 0;
     state.selectedPixel = null;
+    minimizePixelPanel({ keepPanelVisible: false });
     resetMapLayers();
     renderDatasetDetails();
     updateControls();
@@ -674,6 +696,7 @@ async function openProjectFromFolderPicker() {
     state.data = await fetchJson("/api/map-data");
     state.dateIndex = 0;
     state.selectedPixel = null;
+    minimizePixelPanel({ keepPanelVisible: false });
     resetMapLayers();
     renderDatasetDetails();
     updateControls();
@@ -729,7 +752,180 @@ els.coherenceSlider.addEventListener("input", () => {
 window.addEventListener("resize", () => {
   drawMap();
   drawTimeSeries();
+  constrainFloatingPanel();
 });
+
+function showPixelPanel() {
+  els.pixelPanel.hidden = false;
+  els.pixelPanel.classList.remove("minimized");
+  if (!els.pixelPanel.dataset.positioned) {
+    placePanelBottomRight();
+  }
+}
+
+function minimizePixelPanel({ keepPanelVisible = true } = {}) {
+  clearSelectedPixel();
+  resetPixelInfo();
+  drawTimeSeries();
+
+  if (keepPanelVisible) {
+    els.pixelPanel.hidden = false;
+    els.pixelPanel.classList.add("minimized");
+    if (!els.pixelPanel.dataset.positioned) {
+      placePanelBottomRight();
+    }
+  } else {
+    els.pixelPanel.hidden = true;
+    els.pixelPanel.classList.remove("minimized");
+  }
+}
+
+function clearSelectedPixel() {
+  state.selectedPixel = null;
+  if (state.selectedPixelLayer) {
+    state.selectedPixelLayer.remove();
+    state.selectedPixelLayer = null;
+  }
+}
+
+function placePanelBottomRight() {
+  const frame = els.mapFrame.getBoundingClientRect();
+  const width = Math.min(420, Math.max(320, frame.width * 0.36));
+  const height = Math.min(420, Math.max(300, frame.height * 0.44));
+  setPanelGeometry({
+    left: frame.width - width - 18,
+    top: frame.height - height - 18,
+    width,
+    height,
+  });
+  els.pixelPanel.dataset.positioned = "true";
+}
+
+function setPanelGeometry({ left, top, width, height }) {
+  const frame = els.mapFrame.getBoundingClientRect();
+  const minWidth = 300;
+  const minHeight = 170;
+  const nextWidth = clamp(width, minWidth, Math.max(minWidth, frame.width - 24));
+  const nextHeight = clamp(height, minHeight, Math.max(minHeight, frame.height - 24));
+  const nextLeft = clamp(left, 12, Math.max(12, frame.width - nextWidth - 12));
+  const nextTop = clamp(top, 12, Math.max(12, frame.height - nextHeight - 12));
+
+  els.pixelPanel.style.left = `${nextLeft}px`;
+  els.pixelPanel.style.top = `${nextTop}px`;
+  els.pixelPanel.style.width = `${nextWidth}px`;
+  els.pixelPanel.style.height = `${nextHeight}px`;
+}
+
+function constrainFloatingPanel() {
+  if (els.pixelPanel.hidden || !els.pixelPanel.dataset.positioned) return;
+  const panel = els.pixelPanel.getBoundingClientRect();
+  const frame = els.mapFrame.getBoundingClientRect();
+  setPanelGeometry({
+    left: panel.left - frame.left,
+    top: panel.top - frame.top,
+    width: panel.width,
+    height: panel.height,
+  });
+}
+
+function snapFloatingPanel() {
+  if (els.pixelPanel.hidden) return;
+  const panel = els.pixelPanel.getBoundingClientRect();
+  const frame = els.mapFrame.getBoundingClientRect();
+  let left = panel.left - frame.left;
+  let top = panel.top - frame.top;
+  const threshold = 28;
+
+  if (left < threshold) left = 12;
+  if (top < threshold) top = 12;
+  if (frame.width - (left + panel.width) < threshold) left = frame.width - panel.width - 12;
+  if (frame.height - (top + panel.height) < threshold) top = frame.height - panel.height - 12;
+
+  setPanelGeometry({ left, top, width: panel.width, height: panel.height });
+}
+
+function initializeFloatingPanel() {
+  L.DomEvent.disableClickPropagation(els.pixelPanel);
+  L.DomEvent.disableScrollPropagation(els.pixelPanel);
+
+  let dragState = null;
+  let resizeState = null;
+
+  els.pixelPanelHeader.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button")) return;
+    event.preventDefault();
+    els.pixelPanelHeader.setPointerCapture(event.pointerId);
+    const panel = els.pixelPanel.getBoundingClientRect();
+    const frame = els.mapFrame.getBoundingClientRect();
+    dragState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: panel.left - frame.left,
+      top: panel.top - frame.top,
+      width: panel.width,
+      height: panel.height,
+    };
+    els.pixelPanel.classList.add("dragging");
+  });
+
+  els.pixelPanelHeader.addEventListener("pointermove", (event) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    setPanelGeometry({
+      left: dragState.left + event.clientX - dragState.startX,
+      top: dragState.top + event.clientY - dragState.startY,
+      width: dragState.width,
+      height: dragState.height,
+    });
+  });
+
+  els.pixelPanelHeader.addEventListener("pointerup", (event) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    dragState = null;
+    els.pixelPanel.classList.remove("dragging");
+    snapFloatingPanel();
+  });
+
+  els.pixelPanelResize.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    els.pixelPanelResize.setPointerCapture(event.pointerId);
+    const panel = els.pixelPanel.getBoundingClientRect();
+    const frame = els.mapFrame.getBoundingClientRect();
+    resizeState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: panel.left - frame.left,
+      top: panel.top - frame.top,
+      width: panel.width,
+      height: panel.height,
+    };
+    els.pixelPanel.classList.add("resizing");
+  });
+
+  els.pixelPanelResize.addEventListener("pointermove", (event) => {
+    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+    setPanelGeometry({
+      left: resizeState.left,
+      top: resizeState.top,
+      width: resizeState.width + event.clientX - resizeState.startX,
+      height: resizeState.height + event.clientY - resizeState.startY,
+    });
+    drawTimeSeries();
+  });
+
+  els.pixelPanelResize.addEventListener("pointerup", (event) => {
+    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+    resizeState = null;
+    els.pixelPanel.classList.remove("resizing");
+    snapFloatingPanel();
+    drawTimeSeries();
+  });
+
+  els.pixelPanelMinimize.addEventListener("click", () => {
+    minimizePixelPanel({ keepPanelVisible: true });
+  });
+}
 
 function resetMapLayers() {
   state.hasFitProjectBounds = false;
@@ -746,6 +942,7 @@ function resetMapLayers() {
 }
 
 updateControls();
+initializeFloatingPanel();
 drawMap();
 drawTimeSeries();
 setStatus("");

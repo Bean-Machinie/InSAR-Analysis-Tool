@@ -207,13 +207,12 @@ input:focus-visible,
 .viewer-grid {
   display: grid;
   gap: clamp(10px, 1.3vw, 18px);
-  grid-template-columns: 280px minmax(640px, 1fr) 310px;
+  grid-template-columns: 280px minmax(720px, 1fr);
   margin: 0 auto;
   max-width: 1600px;
 }
 
-.sidebar,
-.inspector {
+.sidebar {
   display: grid;
   gap: 14px;
   grid-auto-rows: max-content;
@@ -374,6 +373,7 @@ button:active {
 .map-frame {
   background: #e9e7dc;
   min-height: 0;
+  overflow: hidden;
   position: relative;
 }
 
@@ -442,6 +442,133 @@ button:active {
   text-align: center;
 }
 
+.floating-panel {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(223, 223, 223, 0.95);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(17, 17, 17, 0.2);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 170px;
+  min-width: 300px;
+  overflow: hidden;
+  position: absolute;
+  z-index: 900;
+}
+
+.floating-panel.dragging,
+.floating-panel.resizing {
+  opacity: 0.96;
+  user-select: none;
+}
+
+.floating-panel-header {
+  align-items: center;
+  background: linear-gradient(180deg, #ffffff, #fbfbf7);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 46px;
+  padding: 9px 10px 9px 14px;
+}
+
+.floating-panel-header h2 {
+  font-size: 0.98rem;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.floating-panel-header span {
+  color: var(--muted);
+  display: block;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 0.76rem;
+  font-weight: 600;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.window-button {
+  align-items: center;
+  background: var(--accent);
+  border-color: var(--accent);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  font-weight: 900;
+  height: 30px;
+  justify-content: center;
+  line-height: 1;
+  min-height: 30px;
+  padding: 0;
+  width: 34px;
+}
+
+.window-button:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  transform: none;
+}
+
+.floating-panel-body {
+  display: grid;
+  gap: 12px;
+  grid-template-rows: auto minmax(120px, 1fr);
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.pixel-list.compact {
+  gap: 9px 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pixel-list.compact dt {
+  font-size: 0.68rem;
+  margin-bottom: 3px;
+}
+
+.pixel-list.compact dd {
+  font-size: 0.9rem;
+}
+
+.floating-panel #timeseries-canvas {
+  height: 100%;
+  min-height: 120px;
+}
+
+.floating-panel-resize {
+  border-bottom: 2px solid rgba(17, 17, 17, 0.34);
+  border-right: 2px solid rgba(17, 17, 17, 0.34);
+  bottom: 7px;
+  cursor: nwse-resize;
+  height: 15px;
+  position: absolute;
+  right: 7px;
+  width: 15px;
+}
+
+.floating-panel.minimized {
+  grid-template-rows: auto;
+  height: auto !important;
+  min-height: 0;
+  width: 280px !important;
+}
+
+.floating-panel.minimized .floating-panel-body,
+.floating-panel.minimized .floating-panel-resize {
+  display: none;
+}
+
+.floating-panel.minimized .floating-panel-header {
+  border-bottom: 0;
+}
+
 .map-footer {
   background: #ffffff;
   border-top: 1px solid var(--border);
@@ -505,11 +632,6 @@ button:active {
   .viewer-grid {
     grid-template-columns: 280px minmax(420px, 1fr);
   }
-
-  .inspector {
-    grid-column: 1 / -1;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 860px) {
@@ -529,8 +651,7 @@ button:active {
   }
 
   .topbar,
-  .viewer-grid,
-  .inspector {
+  .viewer-grid {
     grid-template-columns: 1fr;
   }
 
@@ -548,5 +669,13 @@ button:active {
 
   #map {
     min-height: 440px;
+  }
+
+  .floating-panel {
+    min-width: 280px;
+  }
+
+  .pixel-list.compact {
+    grid-template-columns: 1fr;
   }
 }

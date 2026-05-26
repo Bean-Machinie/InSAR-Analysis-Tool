@@ -95,49 +95,51 @@
           <div class="map-frame" id="map-frame">
             <div id="map"></div>
             <div id="map-placeholder" class="map-placeholder">Load a processed project folder to display the map.</div>
+            <section id="pixel-panel" class="floating-panel" aria-label="Pixel inspector" hidden>
+              <div id="pixel-panel-header" class="floating-panel-header">
+                <div>
+                  <h2>Pixel Inspector</h2>
+                  <span id="pixel-panel-subtitle">Selected point</span>
+                </div>
+                <button id="pixel-panel-minimize" class="window-button" type="button" aria-label="Minimize pixel inspector">_</button>
+              </div>
+              <div class="floating-panel-body">
+                <dl class="pixel-list compact">
+                  <div>
+                    <dt>Latitude</dt>
+                    <dd id="pixel-lat">Click the map</dd>
+                  </div>
+                  <div>
+                    <dt>Longitude</dt>
+                    <dd id="pixel-lon">Click the map</dd>
+                  </div>
+                  <div>
+                    <dt>Velocity</dt>
+                    <dd id="pixel-velocity">-</dd>
+                  </div>
+                  <div>
+                    <dt>Coherence</dt>
+                    <dd id="pixel-coherence">-</dd>
+                  </div>
+                  <div>
+                    <dt>Current deformation</dt>
+                    <dd id="pixel-deformation">-</dd>
+                  </div>
+                  <div>
+                    <dt>Passes filter</dt>
+                    <dd id="pixel-passes">-</dd>
+                  </div>
+                </dl>
+                <canvas id="timeseries-canvas" width="360" height="180"></canvas>
+              </div>
+              <div id="pixel-panel-resize" class="floating-panel-resize" aria-hidden="true"></div>
+            </section>
           </div>
           <div class="map-footer">
             <span id="lon-range">Longitude: -</span>
             <span id="lat-range">Latitude: -</span>
           </div>
         </section>
-
-        <aside class="inspector" aria-label="Pixel inspector">
-          <section class="panel">
-            <h2>Pixel Information</h2>
-            <dl class="pixel-list">
-              <div>
-                <dt>Latitude</dt>
-                <dd id="pixel-lat">Click the map</dd>
-              </div>
-              <div>
-                <dt>Longitude</dt>
-                <dd id="pixel-lon">Click the map</dd>
-              </div>
-              <div>
-                <dt>Velocity</dt>
-                <dd id="pixel-velocity">-</dd>
-              </div>
-              <div>
-                <dt>Coherence</dt>
-                <dd id="pixel-coherence">-</dd>
-              </div>
-              <div>
-                <dt>Current deformation</dt>
-                <dd id="pixel-deformation">-</dd>
-              </div>
-              <div>
-                <dt>Passes filter</dt>
-                <dd id="pixel-passes">-</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section class="panel">
-            <h2>Pixel Time Series</h2>
-            <canvas id="timeseries-canvas" width="360" height="220"></canvas>
-          </section>
-        </aside>
       </section>
     </main>
 
