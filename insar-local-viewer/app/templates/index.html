@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>InSAR Local Viewer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <h1>InSAR Local Viewer</h1>
+          <p>Inspect local processed InSAR/SBAS NetCDF project data.</p>
+        </div>
+      </header>
+
+      <section class="panel" aria-labelledby="project-heading">
+        <h2 id="project-heading">Project Information</h2>
+        <dl class="info-grid">
+          <div>
+            <dt>Selected NetCDF file</dt>
+            <dd id="selected-file">Loading...</dd>
+          </div>
+          <div>
+            <dt>Grid counts</dt>
+            <dd id="grid-counts">Loading...</dd>
+          </div>
+          <div>
+            <dt>Geographic bounds</dt>
+            <dd id="bounds">Loading...</dd>
+          </div>
+          <div>
+            <dt>Coordinates</dt>
+            <dd id="coordinates">Loading...</dd>
+          </div>
+          <div class="wide">
+            <dt>Available variables</dt>
+            <dd id="variables">Loading...</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel" aria-labelledby="summary-heading">
+        <h2 id="summary-heading">Layer Summary</h2>
+        <div class="controls">
+          <label for="layer-select">2D layer</label>
+          <select id="layer-select"></select>
+          <button id="load-summary" type="button">Load Layer Summary</button>
+        </div>
+        <pre id="summary-output" class="summary-output">No layer summary loaded.</pre>
+      </section>
+
+      <section id="status" class="status" aria-live="polite"></section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
