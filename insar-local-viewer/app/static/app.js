@@ -362,7 +362,6 @@ function drawMap() {
   }
 
   els.mapPlaceholder.hidden = true;
-  state.map.invalidateSize();
   const bounds = leafletBounds();
   const values = getLayerValues();
   const range = getDisplayRange(state.activeLayer, values);
@@ -403,7 +402,7 @@ function updateRasterLayer() {
     state.rasterLayer = createRasterGridLayer();
     state.rasterLayer.addTo(state.map);
   } else {
-    state.rasterLayer.redraw();
+    state.rasterLayer.redrawInPlace();
   }
 }
 
@@ -421,6 +420,24 @@ function createRasterGridLayer() {
       drawRasterTile(ctx, coords, tileSize);
 
       return tile;
+    },
+    redrawInPlace() {
+      const tiles = Object.values(this._tiles || {});
+      if (!tiles.length) {
+        this.redraw();
+        return;
+      }
+
+      tiles.forEach((tileRecord) => {
+        const tile = tileRecord.el;
+        const coords = tileRecord.coords;
+        if (!tile || !coords) return;
+        const ctx = tile.getContext("2d");
+        if (!ctx) return;
+        ctx.clearRect(0, 0, tile.width, tile.height);
+        ctx.imageSmoothingEnabled = false;
+        drawRasterTile(ctx, coords, this.getTileSize());
+      });
     },
   });
 
@@ -499,7 +516,7 @@ function drawSelectedPixel() {
     state.selectedPixelLayer = createSelectedPixelLayer();
     state.selectedPixelLayer.addTo(state.map);
   } else {
-    state.selectedPixelLayer.redraw();
+    state.selectedPixelLayer.redrawInPlace();
   }
 }
 
@@ -517,6 +534,24 @@ function createSelectedPixelLayer() {
       drawSelectedPixelTile(ctx, coords, tileSize);
 
       return tile;
+    },
+    redrawInPlace() {
+      const tiles = Object.values(this._tiles || {});
+      if (!tiles.length) {
+        this.redraw();
+        return;
+      }
+
+      tiles.forEach((tileRecord) => {
+        const tile = tileRecord.el;
+        const coords = tileRecord.coords;
+        if (!tile || !coords) return;
+        const ctx = tile.getContext("2d");
+        if (!ctx) return;
+        ctx.clearRect(0, 0, tile.width, tile.height);
+        ctx.imageSmoothingEnabled = false;
+        drawSelectedPixelTile(ctx, coords, this.getTileSize());
+      });
     },
   });
 
