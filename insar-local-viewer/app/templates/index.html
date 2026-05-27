@@ -15,41 +15,42 @@
         <div id="file-menu" class="menu-popover" role="menu" hidden>
           <button id="open-project-button" type="button" role="menuitem">Open Project...</button>
           <button id="reload-project-button" type="button" role="menuitem">Reload Current Project</button>
+          <button id="dataset-info-button" type="button" role="menuitem">Dataset Information</button>
         </div>
       </div>
-      <div id="current-project-label" class="current-project">No project loaded</div>
     </nav>
 
-    <main class="app-shell">
-      <header class="topbar">
-        <div>
-          <h1>InSAR Local Viewer</h1>
-          <p>Velocity, deformation, and coherence inspection for processed SBAS results.</p>
+    <section id="dataset-modal" class="modal-backdrop" aria-hidden="true" hidden>
+      <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="dataset-modal-title">
+        <header class="modal-header">
+          <div>
+            <h2 id="dataset-modal-title">Dataset Information</h2>
+            <p id="dataset-project-label">No project loaded</p>
+          </div>
+          <button id="dataset-modal-close" class="window-button" type="button" aria-label="Close dataset information">x</button>
+        </header>
+        <div class="modal-body">
+          <dl class="dataset-list modal-list">
+            <div>
+              <dt>Loaded file</dt>
+              <dd id="dataset-file">Not loaded</dd>
+            </div>
+            <div>
+              <dt>Grid</dt>
+              <dd id="grid-details">-</dd>
+            </div>
+            <div>
+              <dt>Bounds</dt>
+              <dd id="bounds-details">-</dd>
+            </div>
+          </dl>
         </div>
-      </header>
+      </div>
+    </section>
 
-      <section id="status" class="status" aria-live="polite"></section>
-
+    <main class="app-shell">
       <section class="viewer-grid">
         <aside class="sidebar" aria-label="Map controls">
-          <section class="panel">
-            <h2>Dataset</h2>
-            <dl class="dataset-list">
-              <div>
-                <dt>Loaded file</dt>
-                <dd id="dataset-file">Not loaded</dd>
-              </div>
-              <div>
-                <dt>Grid</dt>
-                <dd id="grid-details">-</dd>
-              </div>
-              <div>
-                <dt>Bounds</dt>
-                <dd id="bounds-details">-</dd>
-              </div>
-            </dl>
-          </section>
-
           <section class="panel">
             <h2>Layer</h2>
             <div class="segmented" role="group" aria-label="Primary layer">

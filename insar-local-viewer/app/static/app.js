@@ -23,7 +23,10 @@ const els = {
   fileMenu: document.querySelector("#file-menu"),
   openProjectButton: document.querySelector("#open-project-button"),
   reloadProjectButton: document.querySelector("#reload-project-button"),
-  currentProjectLabel: document.querySelector("#current-project-label"),
+  datasetInfoButton: document.querySelector("#dataset-info-button"),
+  datasetModal: document.querySelector("#dataset-modal"),
+  datasetModalClose: document.querySelector("#dataset-modal-close"),
+  datasetProjectLabel: document.querySelector("#dataset-project-label"),
   status: document.querySelector("#status"),
   datasetFile: document.querySelector("#dataset-file"),
   gridDetails: document.querySelector("#grid-details"),
@@ -100,6 +103,7 @@ async function fetchJson(url, options = {}) {
 }
 
 function setStatus(message, type = "info") {
+  if (!els.status) return;
   els.status.textContent = message;
   els.status.className = `status ${type}`;
 }
@@ -771,10 +775,18 @@ function drawTimeSeries() {
 }
 
 function renderDatasetDetails() {
+  if (!state.data) {
+    els.datasetProjectLabel.textContent = "No project loaded";
+    els.datasetFile.textContent = "Not loaded";
+    els.gridDetails.textContent = "-";
+    els.boundsDetails.textContent = "-";
+    return;
+  }
+
   const project = state.data.project;
   const bounds = project.bounds;
+  els.datasetProjectLabel.textContent = `Project: ${projectFolderName(project.project_path)}`;
   els.datasetFile.textContent = project.dataset_file;
-  els.currentProjectLabel.textContent = `Project: ${projectFolderName(project.project_path)}`;
   els.gridDetails.textContent = `${project.lat_count} rows x ${project.lon_count} columns, ${project.date_count} dates`;
   els.boundsDetails.textContent = `${formatNumber(bounds.lat_min, 5)} to ${formatNumber(bounds.lat_max, 5)} lat; ${formatNumber(bounds.lon_min, 5)} to ${formatNumber(bounds.lon_max, 5)} lon`;
 }
@@ -818,6 +830,19 @@ async function loadProject(projectPath = "") {
 function setMenuOpen(open) {
   els.fileMenu.hidden = !open;
   els.fileMenuButton.setAttribute("aria-expanded", String(open));
+}
+
+function openDatasetModal() {
+  renderDatasetDetails();
+  els.datasetModal.hidden = false;
+  els.datasetModal.setAttribute("aria-hidden", "false");
+  els.datasetModalClose.focus();
+}
+
+function closeDatasetModal() {
+  els.datasetModal.hidden = true;
+  els.datasetModal.setAttribute("aria-hidden", "true");
+  els.fileMenuButton.focus();
 }
 
 async function openProjectFromFolderPicker() {
@@ -865,6 +890,23 @@ els.openProjectButton.addEventListener("click", openProjectFromFolderPicker);
 els.reloadProjectButton.addEventListener("click", () => {
   setMenuOpen(false);
   loadProject("__CURRENT__");
+});
+els.datasetInfoButton.addEventListener("click", () => {
+  setMenuOpen(false);
+  openDatasetModal();
+});
+
+els.datasetModalClose.addEventListener("click", closeDatasetModal);
+els.datasetModal.addEventListener("click", (event) => {
+  if (event.target === els.datasetModal) {
+    closeDatasetModal();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.datasetModal.hidden) {
+    closeDatasetModal();
+  }
 });
 
 els.layerButtons.forEach((button) => {
