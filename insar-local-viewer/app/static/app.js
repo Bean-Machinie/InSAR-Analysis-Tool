@@ -1,6 +1,7 @@
 const state = {
   data: null,
-  activeLayer: "velocity",
+  activeLayer: null,
+  selectedLayer: null,
   dateIndex: 0,
   qualityThresholds: {
     coherence: 0.3,
@@ -8,7 +9,6 @@ const state = {
     goodPairs: 0,
   },
   filterInitialized: false,
-  sidebarCollapsed: localStorage.getItem("insar-sidebar-collapsed") === "true",
   selectedPixel: null,
   map: null,
   rasterLayer: null,
@@ -19,11 +19,9 @@ const state = {
 };
 
 const els = {
-  sidebarToggle: document.querySelector("#sidebar-toggle"),
   sidebar: document.querySelector("#sidebar"),
   appTitle: document.querySelector("#app-title"),
   openProjectButton: document.querySelector("#open-project-button"),
-  reloadProjectButton: document.querySelector("#reload-project-button"),
   datasetInfoButton: document.querySelector("#dataset-info-button"),
   datasetModal: document.querySelector("#dataset-modal"),
   datasetModalClose: document.querySelector("#dataset-modal-close"),
@@ -32,7 +30,11 @@ const els = {
   datasetFile: document.querySelector("#dataset-file"),
   gridDetails: document.querySelector("#grid-details"),
   boundsDetails: document.querySelector("#bounds-details"),
-  layerButtons: document.querySelectorAll(".layer-button"),
+  datasetSelect: document.querySelector(".dataset-select"),
+  datasetSelectButton: document.querySelector("#dataset-select-button"),
+  datasetSelectValue: document.querySelector("#dataset-select-value"),
+  datasetSelectPopover: document.querySelector("#dataset-select-popover"),
+  datasetOptions: document.querySelectorAll(".select-option"),
   datePanel: document.querySelector("#date-panel"),
   dateSlider: document.querySelector("#date-slider"),
   dateValue: document.querySelector("#date-value"),
@@ -102,22 +104,24 @@ function getBounds() {
   return state.data.project.bounds;
 }
 
-function getLayerValues() {
-  if (!state.data) return null;
-  if (state.activeLayer === "velocity") return state.data.layers.velocity.values;
-  if (state.activeLayer === "coherence") return state.data.layers.coherence.values;
-  return state.data.layers.deformation.values[state.dateIndex];
+function getLayerValues(layer = state.activeLayer) {
+  if (!state.data || !layer) return null;
+  if (layer === "velocity") return state.data.layers.velocity.values;
+  if (layer === "coherence") return state.data.layers.coherence.values;
+  if (layer === "deformation") return state.data.layers.deformation.values[state.dateIndex];
+  return null;
 }
 
-function getLayerRange() {
-  if (state.activeLayer === "velocity") return state.data.layers.velocity.range;
-  if (state.activeLayer === "coherence") return state.data.layers.coherence.range;
+function getLayerRange(layer = state.activeLayer) {
+  if (!state.data || !layer) return { min: null, max: null, p02: null, p98: null };
+  if (layer === "velocity") return state.data.layers.velocity.range;
+  if (layer === "coherence") return state.data.layers.coherence.range;
   return state.data.layers.deformation.range;
 }
 
-function getDisplayRange(values = getLayerValues()) {
-  if (!state.data) return getLayerRange();
-  if (state.activeLayer === "coherence") {
+function getDisplayRange(layer = state.activeLayer, values = getLayerValues(layer)) {
+  if (!state.data || !layer || !values) return getLayerRange(layer);
+  if (layer === "coherence") {
     return state.data.layers.coherence.range;
   }
 
@@ -163,8 +167,8 @@ function percentile(sortedValues, percentileValue) {
   return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
 }
 
-function isFilterableLayer() {
-  return state.activeLayer === "velocity" || state.activeLayer === "deformation";
+function isFilterableLayer(layer = state.activeLayer) {
+  return layer === "velocity" || layer === "deformation";
 }
 
 function totalPairCount() {
@@ -323,14 +327,15 @@ function drawMap() {
 
   if (!state.data) {
     els.mapPlaceholder.hidden = false;
+    updateLegend();
     return;
   }
 
   els.mapPlaceholder.hidden = true;
   state.map.invalidateSize();
-  const values = getLayerValues();
-  const range = getDisplayRange(values);
   const bounds = leafletBounds();
+  const values = getLayerValues();
+  const range = getDisplayRange(state.activeLayer, values);
   state.rasterValues = values;
   state.rasterRange = range;
   updateRasterLayer();
@@ -354,7 +359,15 @@ function leafletBounds() {
 }
 
 function updateRasterLayer() {
-  if (!state.map || !state.data || !state.rasterValues || !state.rasterRange) return;
+  if (!state.map || !state.data) return;
+
+  if (!state.activeLayer || !state.rasterValues || !state.rasterRange) {
+    if (state.rasterLayer) {
+      state.rasterLayer.remove();
+      state.rasterLayer = null;
+    }
+    return;
+  }
 
   if (!state.rasterLayer) {
     state.rasterLayer = createRasterGridLayer();
@@ -392,7 +405,7 @@ function createRasterGridLayer() {
 }
 
 function drawRasterTile(ctx, coords, tileSize) {
-  if (!state.data || !state.rasterValues || !state.rasterRange) return;
+  if (!state.data || !state.activeLayer || !state.rasterValues || !state.rasterRange) return;
   if (state.rasterRange.p02 === null && state.activeLayer !== "coherence") return;
 
   const values = state.rasterValues;
@@ -569,15 +582,20 @@ function syncQualityControls() {
 }
 
 function updateControls() {
-  els.layerButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.layer === state.activeLayer);
+  els.datasetOptions.forEach((option) => {
+    const isSelected = option.dataset.layer === state.selectedLayer;
+    option.classList.toggle("active", isSelected);
+    option.setAttribute("aria-selected", String(isSelected));
+    option.dataset.activeLayer = String(option.dataset.layer === state.activeLayer);
   });
+  updateDatasetSelectValue();
 
   els.datePanel.hidden = state.activeLayer !== "deformation";
   els.filterPanel.hidden = !isFilterableLayer();
   syncQualityControls();
   updateStatusFooter();
   updateAppTitle();
+  updateLegend();
 
   if (state.data) {
     els.dateSlider.max = Math.max(0, state.data.dates.length - 1);
@@ -587,7 +605,7 @@ function updateControls() {
 }
 
 function updateStatusFooter() {
-  if (!state.data) {
+  if (!state.data || !state.activeLayer) {
     els.visiblePixelStatus.textContent = "No pixels visible";
     els.lastUpdatedStatus.textContent = "Last updated: n/a";
     return;
@@ -600,7 +618,7 @@ function updateStatusFooter() {
 
 function updateAppTitle() {
   const projectName = state.data ? projectFolderName(state.data.project.project_path) : "No project loaded";
-  els.appTitle.textContent = `InSAR SBAS Viewer · ${projectName}`;
+  els.appTitle.textContent = `InSAR SBAS Viewer - ${projectName}`;
 }
 
 function formatDateTime(value) {
@@ -616,8 +634,16 @@ function formatDateTime(value) {
 }
 
 function updateLegend() {
-  if (!state.data) return;
-  const range = getDisplayRange();
+  if (!state.data || !state.activeLayer) {
+    els.legendTitle.textContent = "No dataset selected";
+    els.legendBar.style.background = "transparent";
+    els.legendMin.textContent = "-";
+    els.legendMid.textContent = "-";
+    els.legendMax.textContent = "-";
+    return;
+  }
+
+  const range = getDisplayRange(state.activeLayer);
   els.legendTitle.textContent = layerText[state.activeLayer].title;
 
   if (state.activeLayer === "coherence") {
@@ -813,18 +839,41 @@ function closeDatasetModal() {
   els.datasetInfoButton.focus();
 }
 
-function applySidebarState() {
-  document.body.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
-  els.sidebarToggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
-  setTimeout(() => {
-    if (state.map) state.map.invalidateSize();
-  }, 220);
+function selectedLayerNames() {
+  return state.selectedLayer ? [layerText[state.selectedLayer].title] : [];
 }
 
-function toggleSidebar() {
-  state.sidebarCollapsed = !state.sidebarCollapsed;
-  localStorage.setItem("insar-sidebar-collapsed", String(state.sidebarCollapsed));
-  applySidebarState();
+function updateDatasetSelectValue() {
+  const names = selectedLayerNames();
+  if (!names.length) {
+    els.datasetSelectValue.textContent = "Select datasets";
+    return;
+  }
+  if (names.length <= 2) {
+    els.datasetSelectValue.textContent = names.join(", ");
+    return;
+  }
+  els.datasetSelectValue.textContent = `${names.length} datasets selected`;
+}
+
+function setDatasetSelectOpen(isOpen) {
+  els.datasetSelect.dataset.open = String(isOpen);
+  els.datasetSelectButton.setAttribute("aria-expanded", String(isOpen));
+  els.datasetSelectPopover.hidden = !isOpen;
+}
+
+function toggleSelectedLayer(layer) {
+  if (state.selectedLayer === layer) {
+    state.selectedLayer = null;
+    state.activeLayer = null;
+  } else {
+    state.selectedLayer = layer;
+    state.activeLayer = layer;
+  }
+
+  updateControls();
+  drawMap();
+  drawTimeSeries();
 }
 
 async function openProjectFromFolderPicker() {
@@ -856,9 +905,6 @@ async function openProjectFromFolderPicker() {
 }
 
 els.openProjectButton.addEventListener("click", openProjectFromFolderPicker);
-els.reloadProjectButton.addEventListener("click", () => {
-  loadProject("__CURRENT__");
-});
 els.datasetInfoButton.addEventListener("click", () => {
   openDatasetModal();
 });
@@ -874,15 +920,27 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !els.datasetModal.hidden) {
     closeDatasetModal();
   }
+
+  if (event.key === "Escape" && !els.datasetSelectPopover.hidden) {
+    setDatasetSelectOpen(false);
+    els.datasetSelectButton.focus();
+  }
 });
 
-els.layerButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    state.activeLayer = button.dataset.layer;
-    updateControls();
-    drawMap();
-    drawTimeSeries();
+els.datasetSelectButton.addEventListener("click", () => {
+  setDatasetSelectOpen(els.datasetSelectPopover.hidden);
+});
+
+els.datasetOptions.forEach((option) => {
+  option.addEventListener("click", () => {
+    toggleSelectedLayer(option.dataset.layer);
   });
+});
+
+document.addEventListener("click", (event) => {
+  if (!els.datasetSelect.contains(event.target)) {
+    setDatasetSelectOpen(false);
+  }
 });
 
 els.dateSlider.addEventListener("input", () => {
@@ -891,8 +949,6 @@ els.dateSlider.addEventListener("input", () => {
   drawMap();
   drawTimeSeries();
 });
-
-els.sidebarToggle.addEventListener("click", toggleSidebar);
 
 els.coherenceThresholdSlider.addEventListener("input", () => {
   state.qualityThresholds.coherence = Number(els.coherenceThresholdSlider.value);
@@ -1104,7 +1160,6 @@ function resetMapLayers() {
   }
 }
 
-applySidebarState();
 updateControls();
 initializeFloatingPanel();
 drawMap();

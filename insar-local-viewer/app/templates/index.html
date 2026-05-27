@@ -8,19 +8,14 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   </head>
   <body>
-    <nav class="topbar" aria-label="Application toolbar">
-      <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Toggle sidebar" aria-expanded="true">☰</button>
-      <div id="app-title" class="app-title">InSAR SBAS Viewer</div>
-    </nav>
-
     <section id="dataset-modal" class="modal-backdrop" aria-hidden="true" hidden>
       <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="dataset-modal-title">
         <header class="modal-header">
           <div>
-            <h2 id="dataset-modal-title">Dataset Information</h2>
+            <h2 id="dataset-modal-title">Dataset</h2>
             <p id="dataset-project-label">No project loaded</p>
           </div>
-          <button id="dataset-modal-close" class="window-button" type="button" aria-label="Close dataset information">x</button>
+          <button id="dataset-modal-close" class="window-button" type="button" aria-label="Close dataset">x</button>
         </header>
         <div class="modal-body">
           <dl class="dataset-list modal-list">
@@ -37,6 +32,11 @@
               <dd id="bounds-details">-</dd>
             </div>
           </dl>
+          <section class="dataset-status" aria-label="Status">
+            <h3>Status</h3>
+            <p id="visible-pixel-status">No pixels visible</p>
+            <p id="last-updated-status">Last updated: n/a</p>
+          </section>
         </div>
       </div>
     </section>
@@ -45,31 +45,44 @@
       <section class="viewer-grid">
         <aside id="sidebar" class="sidebar" aria-label="Map controls">
           <div class="sidebar-scroll">
+            <div class="sidebar-brand">
+              <div id="app-title" class="app-title">InSAR SBAS Viewer</div>
+            </div>
             <section class="sidebar-section">
-              <h2>File</h2>
               <div class="action-list">
                 <button id="open-project-button" class="action-row" type="button">
-                  <span aria-hidden="true">▣</span>
+                  <img class="action-icon" src="{{ url_for('assets', filename='icons/open-project.svg') }}" alt="" aria-hidden="true">
                   <span>Open project...</span>
                 </button>
-                <button id="reload-project-button" class="action-row" type="button">
-                  <span aria-hidden="true">↻</span>
-                  <span>Reload current project</span>
-                </button>
                 <button id="dataset-info-button" class="action-row" type="button">
-                  <span aria-hidden="true">i</span>
-                  <span>Dataset information</span>
+                  <img class="action-icon" src="{{ url_for('assets', filename='icons/dataset.svg') }}" alt="" aria-hidden="true">
+                  <span>Dataset</span>
                 </button>
               </div>
             </section>
 
             <section class="sidebar-section">
-              <h2>Data Layer</h2>
-            <div class="segmented" role="group" aria-label="Primary layer">
-              <button class="layer-button active" type="button" data-layer="velocity">Velocity</button>
-              <button class="layer-button" type="button" data-layer="deformation">Deformation</button>
-              <button class="layer-button" type="button" data-layer="coherence">Coherence</button>
-            </div>
+              <div class="dataset-select" data-open="false">
+                <label id="dataset-select-label" class="select-label" for="dataset-select-button">Datasets</label>
+                <button id="dataset-select-button" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="dataset-select-label dataset-select-value">
+                  <span id="dataset-select-value" class="select-value">Select datasets</span>
+                  <span class="select-chevron" aria-hidden="true"></span>
+                </button>
+                <div id="dataset-select-popover" class="select-popover" role="listbox" aria-labelledby="dataset-select-label" aria-multiselectable="true" hidden>
+                  <button class="select-option" type="button" role="option" aria-selected="false" data-layer="velocity">
+                    <span class="option-text">Velocity</span>
+                    <span class="option-check" aria-hidden="true"></span>
+                  </button>
+                  <button class="select-option" type="button" role="option" aria-selected="false" data-layer="deformation">
+                    <span class="option-text">Deformation</span>
+                    <span class="option-check" aria-hidden="true"></span>
+                  </button>
+                  <button class="select-option" type="button" role="option" aria-selected="false" data-layer="coherence">
+                    <span class="option-text">Coherence</span>
+                    <span class="option-check" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
             </section>
 
             <section id="filter-panel" class="sidebar-section">
@@ -102,12 +115,6 @@
               </div>
             </section>
           </div>
-
-          <section class="sidebar-status" aria-label="Status">
-            <h2>Status</h2>
-            <p id="visible-pixel-status">No pixels visible</p>
-            <p id="last-updated-status">Last updated: n/a</p>
-          </section>
         </aside>
 
         <section class="map-panel" aria-label="Map view">

@@ -1,7 +1,7 @@
 from pathlib import Path
 import threading
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from data_loader import (
     ProjectDataError,
@@ -21,6 +21,11 @@ app.config["PROJECT_DIR"] = DEFAULT_PROJECT_DIR
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/assets/<path:filename>")
+def assets(filename):
+    return send_from_directory(BASE_DIR / "assets", filename)
 
 
 @app.route("/api/project", methods=["POST"])
