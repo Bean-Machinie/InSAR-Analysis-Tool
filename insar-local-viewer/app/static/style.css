@@ -472,11 +472,12 @@ button:active {
 .map-toolbar {
   align-items: center;
   display: flex;
-  gap: 8px;
-  left: 50%;
+  justify-content: center;
+  left: 16px;
+  pointer-events: none;
   position: absolute;
+  right: 16px;
   top: 16px;
-  transform: translateX(-50%);
   z-index: 850;
 }
 
@@ -493,6 +494,7 @@ button:active {
   gap: 7px;
   min-height: 36px;
   padding: 0 12px;
+  pointer-events: auto;
 }
 
 .map-toggle-button[aria-pressed="true"] {
@@ -501,16 +503,14 @@ button:active {
   color: #ffffff;
 }
 
-.terrain-icon {
-  background:
-    radial-gradient(circle at 65% 35%, currentColor 0 2px, transparent 2.5px),
-    linear-gradient(135deg, transparent 38%, currentColor 39% 43%, transparent 44%),
-    linear-gradient(45deg, transparent 48%, currentColor 49% 53%, transparent 54%);
-  border: 2px solid currentColor;
-  border-radius: 999px;
-  display: inline-block;
+.view-icon {
+  display: block;
   height: 16px;
   width: 16px;
+}
+
+.map-toggle-button[aria-pressed="true"] .view-icon {
+  filter: brightness(0) invert(1);
 }
 
 .exaggeration-control {
@@ -525,6 +525,9 @@ button:active {
   grid-template-columns: auto minmax(110px, 150px) auto;
   min-height: 36px;
   padding: 0 10px;
+  pointer-events: auto;
+  position: absolute;
+  right: 0;
 }
 
 .exaggeration-control label,
@@ -614,20 +617,83 @@ button:active {
 }
 
 .date-dock {
-  background: rgba(255, 255, 255, 0.94);
+  align-items: center;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
   border: 1px solid rgba(223, 223, 223, 0.95);
   border-radius: var(--radius-md);
   bottom: 16px;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 12px 32px rgba(17, 17, 17, 0.14);
   display: grid;
-  gap: 6px;
-  grid-template-columns: auto minmax(180px, 420px) auto;
+  gap: 14px;
+  grid-template-columns: 138px minmax(260px, 1fr) 104px;
   left: 50%;
   max-width: calc(100% - 32px);
-  padding: 10px 12px;
+  padding: 12px 14px;
   position: absolute;
   transform: translateX(-50%);
+  width: min(680px, calc(100% - 32px));
   z-index: 800;
+}
+
+.date-dock label {
+  line-height: 1;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.date-dock .control-value {
+  color: var(--text);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+  letter-spacing: 0;
+  margin: 0;
+  min-width: 104px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.date-dock input[type="range"] {
+  appearance: none;
+  background: transparent;
+  height: 28px;
+  margin: 0;
+}
+
+.date-dock input[type="range"]::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, rgba(252, 217, 0, 0.95), rgba(252, 217, 0, 0.55));
+  border: 1px solid rgba(145, 145, 145, 0.35);
+  border-radius: 999px;
+  height: 8px;
+}
+
+.date-dock input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  background: var(--accent);
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 3px 10px rgba(17, 17, 17, 0.22);
+  height: 20px;
+  margin-top: -7px;
+  width: 20px;
+}
+
+.date-dock input[type="range"]::-moz-range-track {
+  background: linear-gradient(90deg, rgba(252, 217, 0, 0.95), rgba(252, 217, 0, 0.55));
+  border: 1px solid rgba(145, 145, 145, 0.35);
+  border-radius: 999px;
+  height: 8px;
+}
+
+.date-dock input[type="range"]::-moz-range-thumb {
+  background: var(--accent);
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 3px 10px rgba(17, 17, 17, 0.22);
+  height: 16px;
+  width: 16px;
 }
 
 .coherence-dock {
@@ -940,10 +1006,17 @@ button:active {
     grid-template-columns: 280px minmax(0, 1fr);
   }
   .date-dock {
+    gap: 8px;
     grid-template-columns: 1fr;
     left: 12px;
     right: 12px;
     transform: none;
+    width: auto;
+  }
+
+  .date-dock .control-value {
+    min-width: 0;
+    text-align: left;
   }
 
   .coherence-dock {

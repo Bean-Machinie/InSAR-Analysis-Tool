@@ -124,7 +124,7 @@
             <div id="map-placeholder" class="map-placeholder">Load a processed project folder to display the map.</div>
             <div class="map-toolbar" aria-label="Map view controls">
               <button id="view-3d-toggle" class="map-toggle-button" type="button" aria-pressed="false" title="Toggle 3D view. Drag to orbit, Shift-drag or right-drag to pan, scroll to zoom.">
-                <span class="terrain-icon" aria-hidden="true"></span>
+                <img class="view-icon" src="{{ url_for('assets', filename='icons/cube.svg') }}" alt="" aria-hidden="true">
                 <span>3D</span>
               </button>
               <div id="vertical-exaggeration-control" class="exaggeration-control" hidden>

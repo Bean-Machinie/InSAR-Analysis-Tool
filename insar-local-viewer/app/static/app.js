@@ -1025,6 +1025,7 @@ function update3DPoints() {
   }
   view.pixelLookup = [];
   view.pixelInstances = [];
+  view.pixelBaseColors = null;
 
   if (!state.activeLayer || !state.rasterValues || !state.rasterRange) return;
   if (state.rasterRange.p02 === null && state.activeLayer !== "coherence") return;
@@ -1053,8 +1054,9 @@ function update3DPoints() {
   const geometry = new THREE.InstancedBufferGeometry().copy(sphereGeometry);
   sphereGeometry.dispose();
   const radii = new Float32Array(view.pixelInstances.length).fill(radius);
+  view.pixelBaseColors = new Float32Array(colors);
   geometry.setAttribute("instanceOffset", new THREE.InstancedBufferAttribute(new Float32Array(offsets), 3));
-  geometry.setAttribute("instanceColor", new THREE.InstancedBufferAttribute(new Float32Array(colors), 3));
+  geometry.setAttribute("instanceColor", new THREE.InstancedBufferAttribute(new Float32Array(view.pixelBaseColors), 3));
   geometry.setAttribute("instanceRadius", new THREE.InstancedBufferAttribute(radii, 1));
   geometry.instanceCount = view.pixelInstances.length;
 
@@ -1124,7 +1126,7 @@ function current3DPointRadius() {
     widthMeters / Math.max(state.data.lon.length, 1),
     heightMeters / Math.max(state.data.lat.length, 1),
   );
-  return clamp(cellBase * 0.62, 4, Math.max(26, cellBase * 2.2));
+  return clamp(cellBase * 0.44, 3, Math.max(18, cellBase * 1.6));
 }
 
 function update3DSelection() {
@@ -1135,15 +1137,37 @@ function update3DSelection() {
     view.scene.remove(view.selectedMesh);
     view.selectedMesh = null;
   }
-  if (!state.selectedPixel || !state.is3D) return;
 
-  const { row, col } = state.selectedPixel;
-  const geometry = new THREE.SphereGeometry(1, 18, 12);
-  const material = new THREE.MeshBasicMaterial({ color: 0xfcd900, wireframe: true });
-  view.selectedMesh = new THREE.Mesh(geometry, material);
-  view.selectedMesh.position.copy(worldPosition(row, col, THREE_VIEW_CONFIG.verticalOffsetMeters));
-  view.selectedMesh.scale.setScalar(current3DPointRadius() * 1.9);
-  view.scene.add(view.selectedMesh);
+  const colors = view.pointMesh?.geometry?.getAttribute("instanceColor");
+  if (!colors || !view.pixelBaseColors) return;
+
+  for (let index = 0; index < colors.count; index += 1) {
+    const base = index * 3;
+    colors.setXYZ(
+      index,
+      view.pixelBaseColors[base],
+      view.pixelBaseColors[base + 1],
+      view.pixelBaseColors[base + 2],
+    );
+  }
+
+  if (state.selectedPixel && state.is3D) {
+    const selectedIndex = view.pixelLookup.findIndex((pixel) => (
+      pixel.row === state.selectedPixel.row && pixel.col === state.selectedPixel.col
+    ));
+    if (selectedIndex >= 0) {
+      const base = selectedIndex * 3;
+      const opacity = 0.38;
+      colors.setXYZ(
+        selectedIndex,
+        view.pixelBaseColors[base] * (1 - opacity) + 1.0 * opacity,
+        view.pixelBaseColors[base + 1] * (1 - opacity) + 0.92 * opacity,
+        view.pixelBaseColors[base + 2] * (1 - opacity) + 0.34 * opacity,
+      );
+    }
+  }
+
+  colors.needsUpdate = true;
 }
 
 function pick3DPixel(event) {
