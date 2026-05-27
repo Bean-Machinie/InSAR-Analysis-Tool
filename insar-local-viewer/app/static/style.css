@@ -202,7 +202,8 @@ input:focus-visible,
 
 dt,
 .sidebar label,
-.date-dock label {
+.date-dock label,
+.coherence-dock label {
   color: var(--muted);
   display: block;
   font-family: Inter, "Segoe UI", Arial, sans-serif;
@@ -226,7 +227,8 @@ dd {
 }
 
 .sidebar input[type="range"],
-.date-dock input[type="range"] {
+.date-dock input[type="range"],
+.coherence-dock input[type="range"] {
   accent-color: var(--accent);
   cursor: pointer;
   width: 100%;
@@ -542,6 +544,74 @@ button:active {
   z-index: 800;
 }
 
+.coherence-dock {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(223, 223, 223, 0.95);
+  border-radius: var(--radius-md);
+  bottom: 16px;
+  box-shadow: var(--shadow-md);
+  display: grid;
+  gap: 8px;
+  left: 50%;
+  max-width: calc(100% - 32px);
+  min-width: min(460px, calc(100% - 32px));
+  padding: 10px 12px 12px;
+  position: absolute;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 32px));
+  z-index: 820;
+}
+
+.coherence-dock-header {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.coherence-dock-header .control-value {
+  font-size: 0.82rem;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coherence-dock-controls {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+}
+
+.step-button {
+  align-items: center;
+  background: var(--surface-soft);
+  border-color: var(--border);
+  display: inline-flex;
+  font-size: 1.2rem;
+  height: 32px;
+  justify-content: center;
+  line-height: 1;
+  min-height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+.step-button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  transform: none;
+}
+
+.step-button:disabled {
+  color: #b7b7b0;
+  cursor: default;
+  opacity: 0.7;
+}
+
 .floating-panel.dragging,
 .floating-panel.resizing {
   opacity: 0.96;
@@ -733,6 +803,23 @@ button:active {
     left: 12px;
     right: 12px;
     transform: none;
+  }
+
+  .coherence-dock {
+    left: 12px;
+    min-width: 0;
+    right: 12px;
+    transform: none;
+    width: auto;
+  }
+
+  .coherence-dock-header {
+    grid-template-columns: 1fr;
+  }
+
+  .coherence-dock-header .control-value {
+    text-align: left;
+    white-space: normal;
   }
 
   #map {

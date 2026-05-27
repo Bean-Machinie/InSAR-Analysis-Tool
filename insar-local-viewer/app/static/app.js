@@ -3,6 +3,7 @@ const state = {
   activeLayer: null,
   selectedLayer: null,
   dateIndex: 0,
+  coherencePairIndex: 0,
   qualityThresholds: {
     coherence: 0.3,
     stability: 0.2,
@@ -38,6 +39,11 @@ const els = {
   datePanel: document.querySelector("#date-panel"),
   dateSlider: document.querySelector("#date-slider"),
   dateValue: document.querySelector("#date-value"),
+  coherencePairPanel: document.querySelector("#coherence-pair-panel"),
+  coherencePairSlider: document.querySelector("#coherence-pair-slider"),
+  coherencePairValue: document.querySelector("#coherence-pair-value"),
+  coherencePairPrev: document.querySelector("#coherence-pair-prev"),
+  coherencePairNext: document.querySelector("#coherence-pair-next"),
   filterPanel: document.querySelector("#filter-panel"),
   coherenceThresholdSlider: document.querySelector("#coherence-threshold-slider"),
   coherenceThresholdValue: document.querySelector("#coherence-threshold-value"),
@@ -58,6 +64,7 @@ const els = {
   pixelLat: document.querySelector("#pixel-lat"),
   pixelLon: document.querySelector("#pixel-lon"),
   pixelVelocity: document.querySelector("#pixel-velocity"),
+  pixelCoherenceLabel: document.querySelector("#pixel-coherence-label"),
   pixelCoherence: document.querySelector("#pixel-coherence"),
   pixelStability: document.querySelector("#pixel-stability"),
   pixelGoodPairs: document.querySelector("#pixel-good-pairs"),
@@ -107,9 +114,20 @@ function getBounds() {
 function getLayerValues(layer = state.activeLayer) {
   if (!state.data || !layer) return null;
   if (layer === "velocity") return state.data.layers.velocity.values;
-  if (layer === "coherence") return state.data.layers.coherence.values;
+  if (layer === "coherence") return getCoherenceValues();
   if (layer === "deformation") return state.data.layers.deformation.values[state.dateIndex];
   return null;
+}
+
+function getCoherenceValues() {
+  const stack = state.data?.layers.coherence.stack;
+  if (!stack?.length) return state.data?.layers.coherence.values ?? null;
+  const index = clamp(state.coherencePairIndex, 0, stack.length - 1);
+  return stack[index];
+}
+
+function getCoherencePairs() {
+  return state.data?.layers.coherence.pairs ?? [];
 }
 
 function getLayerRange(layer = state.activeLayer) {
@@ -590,7 +608,8 @@ function updateControls() {
   });
   updateDatasetSelectValue();
 
-  els.datePanel.hidden = state.activeLayer !== "deformation";
+  els.datePanel.hidden = state.activeLayer !== "deformation" || !state.data;
+  els.coherencePairPanel.hidden = state.activeLayer !== "coherence" || !state.data;
   els.filterPanel.hidden = !isFilterableLayer();
   syncQualityControls();
   updateStatusFooter();
@@ -601,7 +620,24 @@ function updateControls() {
     els.dateSlider.max = Math.max(0, state.data.dates.length - 1);
     els.dateSlider.value = state.dateIndex;
     els.dateValue.textContent = state.data.dates[state.dateIndex] || "-";
+
+    const coherencePairs = getCoherencePairs();
+    const maxPairIndex = Math.max(0, coherencePairs.length - 1);
+    state.coherencePairIndex = clamp(state.coherencePairIndex, 0, maxPairIndex);
+    els.coherencePairSlider.max = maxPairIndex;
+    els.coherencePairSlider.value = state.coherencePairIndex;
+    els.coherencePairValue.textContent = coherencePairLabel(state.coherencePairIndex);
+    els.coherencePairPrev.disabled = state.coherencePairIndex <= 0;
+    els.coherencePairNext.disabled = state.coherencePairIndex >= maxPairIndex;
   }
+}
+
+function coherencePairLabel(index) {
+  const pairs = getCoherencePairs();
+  if (!pairs.length) return "Median coherence";
+  const label = pairs[index] || pairs[0];
+  const readable = label.replace(/\s+/, " to ");
+  return `${index + 1} / ${pairs.length}: ${readable}`;
 }
 
 function updateStatusFooter() {
@@ -668,7 +704,9 @@ function updatePixelInfo() {
   }
   const { row, col } = state.selectedPixel;
   const velocity = state.data.layers.velocity.values[row][col];
-  const coherence = state.data.layers.coherence.values[row][col];
+  const coherence = state.activeLayer === "coherence"
+    ? getCoherenceValues()?.[row]?.[col]
+    : state.data.layers.coherence.values[row][col];
   const stability = state.data.layers.coherence_stability.values[row][col];
   const goodPairs = state.data.layers.n_good_pairs.values[row][col];
   const totalPairs = state.data.layers.n_good_pairs.n_pairs_total;
@@ -679,6 +717,7 @@ function updatePixelInfo() {
   els.pixelLat.textContent = formatNumber(state.data.lat[row], 6);
   els.pixelLon.textContent = formatNumber(state.data.lon[col], 6);
   els.pixelVelocity.textContent = `${formatNumber(velocity)} mm/year`;
+  els.pixelCoherenceLabel.innerHTML = `${state.activeLayer === "coherence" ? "Pair coherence" : "Median coherence"} <span class="metric-hint">high = good</span>`;
   els.pixelCoherence.textContent = formatNumber(coherence, 2);
   els.pixelStability.textContent = formatNumber(stability, 2);
   els.pixelGoodPairs.textContent = `${formatNumber(goodPairs, 0)} / ${totalPairs}`;
@@ -692,6 +731,7 @@ function resetPixelInfo() {
   els.pixelLat.textContent = "Click the map";
   els.pixelLon.textContent = "Click the map";
   els.pixelVelocity.textContent = "-";
+  els.pixelCoherenceLabel.innerHTML = "Median coherence <span class=\"metric-hint\">high = good</span>";
   els.pixelCoherence.textContent = "-";
   els.pixelStability.textContent = "-";
   els.pixelGoodPairs.textContent = "-";
@@ -810,6 +850,7 @@ async function loadProject(projectPath = "") {
     state.data = await fetchJson("/api/map-data");
     initializeFilterThresholds();
     state.dateIndex = 0;
+    state.coherencePairIndex = 0;
     state.selectedPixel = null;
     minimizePixelPanel({ keepPanelVisible: false });
     resetMapLayers();
@@ -888,6 +929,7 @@ async function openProjectFromFolderPicker() {
     state.data = await fetchJson("/api/map-data");
     initializeFilterThresholds();
     state.dateIndex = 0;
+    state.coherencePairIndex = 0;
     state.selectedPixel = null;
     minimizePixelPanel({ keepPanelVisible: false });
     resetMapLayers();
@@ -948,6 +990,26 @@ els.dateSlider.addEventListener("input", () => {
   updateControls();
   drawMap();
   drawTimeSeries();
+});
+
+function setCoherencePairIndex(index) {
+  const pairs = getCoherencePairs();
+  state.coherencePairIndex = clamp(index, 0, Math.max(0, pairs.length - 1));
+  updateControls();
+  drawMap();
+  updatePixelInfo();
+}
+
+els.coherencePairSlider.addEventListener("input", () => {
+  setCoherencePairIndex(Number(els.coherencePairSlider.value));
+});
+
+els.coherencePairPrev.addEventListener("click", () => {
+  setCoherencePairIndex(state.coherencePairIndex - 1);
+});
+
+els.coherencePairNext.addEventListener("click", () => {
+  setCoherencePairIndex(state.coherencePairIndex + 1);
 });
 
 els.coherenceThresholdSlider.addEventListener("input", () => {

@@ -126,6 +126,17 @@
               <input id="date-slider" type="range" min="0" max="0" value="0" step="1">
               <div class="control-value" id="date-value">-</div>
             </section>
+            <section id="coherence-pair-panel" class="coherence-dock" aria-label="Coherence pair" hidden>
+              <div class="coherence-dock-header">
+                <label for="coherence-pair-slider">Coherence pair</label>
+                <div class="control-value" id="coherence-pair-value">-</div>
+              </div>
+              <div class="coherence-dock-controls">
+                <button id="coherence-pair-prev" class="step-button" type="button" aria-label="Previous coherence pair">&lsaquo;</button>
+                <input id="coherence-pair-slider" type="range" min="0" max="0" value="0" step="1">
+                <button id="coherence-pair-next" class="step-button" type="button" aria-label="Next coherence pair">&rsaquo;</button>
+              </div>
+            </section>
             <section id="pixel-panel" class="floating-panel" aria-label="Pixel inspector" hidden>
               <div id="pixel-panel-header" class="floating-panel-header">
                 <div>
@@ -149,7 +160,7 @@
                     <dd id="pixel-velocity">-</dd>
                   </div>
                   <div>
-                    <dt>Median coherence <span class="metric-hint">high = good</span></dt>
+                    <dt id="pixel-coherence-label">Median coherence <span class="metric-hint">high = good</span></dt>
                     <dd id="pixel-coherence">-</dd>
                   </div>
                   <div>

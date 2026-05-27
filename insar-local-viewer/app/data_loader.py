@@ -97,6 +97,7 @@ def get_map_data(project_dir: Path) -> dict:
         displacement = _read_3d(dataset, products["deformation"])
         rmse = _read_2d(dataset, products["rmse"])
         coherence_stack = _read_coherence_stack(dataset, products["coherence_stack"])
+        coherence_pairs = _pair_strings(dataset)
         n_pairs_total = int(coherence_stack.shape[0])
         coherence_stability = coherence_stack.std(axis=0).astype("float32")
         n_good_pairs = (coherence_stack >= 0.3).sum(axis=0).astype("int16")
@@ -128,6 +129,8 @@ def get_map_data(project_dir: Path) -> dict:
                 },
                 "coherence": {
                     "values": _array_to_json(coherence),
+                    "stack": _array_to_json(coherence_stack),
+                    "pairs": coherence_pairs,
                     "range": {"min": 0.0, "max": 1.0, "p02": 0.0, "p98": 1.0},
                     "unit": "unitless",
                 },
@@ -211,6 +214,13 @@ def _date_strings(dataset):
         return []
     values = np.asarray(dataset.coords["date"].values)
     return [np.datetime_as_string(value, unit="D") for value in values]
+
+
+def _pair_strings(dataset):
+    if "pair" not in dataset.coords:
+        return []
+    values = np.asarray(dataset.coords["pair"].values)
+    return [str(value) for value in values]
 
 
 def _resolve_products(dataset):
