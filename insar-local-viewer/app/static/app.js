@@ -2,7 +2,13 @@ const state = {
   data: null,
   activeLayer: "velocity",
   dateIndex: 0,
-  coherenceThreshold: 0.3,
+  qualityValue: 0.5,
+  qualityIsCustom: false,
+  qualityThresholds: {
+    coherence: 0.3,
+    stability: 0.18,
+    goodPairs: 6,
+  },
   selectedPixel: null,
   map: null,
   rasterLayer: null,
@@ -27,8 +33,15 @@ const els = {
   dateSlider: document.querySelector("#date-slider"),
   dateValue: document.querySelector("#date-value"),
   filterPanel: document.querySelector("#filter-panel"),
-  coherenceSlider: document.querySelector("#coherence-slider"),
-  coherenceValue: document.querySelector("#coherence-value"),
+  qualitySlider: document.querySelector("#quality-slider"),
+  qualityValue: document.querySelector("#quality-value"),
+  qualityNote: document.querySelector("#quality-note"),
+  coherenceThresholdSlider: document.querySelector("#coherence-threshold-slider"),
+  coherenceThresholdValue: document.querySelector("#coherence-threshold-value"),
+  stabilityMaxSlider: document.querySelector("#stability-max-slider"),
+  stabilityMaxValue: document.querySelector("#stability-max-value"),
+  goodPairsMinSlider: document.querySelector("#good-pairs-min-slider"),
+  goodPairsMinValue: document.querySelector("#good-pairs-min-value"),
   filterBadge: document.querySelector("#active-filter-badge"),
   legendTitle: document.querySelector("#legend-title"),
   legendBar: document.querySelector("#legend-bar"),
@@ -45,6 +58,9 @@ const els = {
   pixelLon: document.querySelector("#pixel-lon"),
   pixelVelocity: document.querySelector("#pixel-velocity"),
   pixelCoherence: document.querySelector("#pixel-coherence"),
+  pixelStability: document.querySelector("#pixel-stability"),
+  pixelGoodPairs: document.querySelector("#pixel-good-pairs"),
+  pixelRmse: document.querySelector("#pixel-rmse"),
   pixelDeformation: document.querySelector("#pixel-deformation"),
   pixelPasses: document.querySelector("#pixel-passes"),
   pixelPanel: document.querySelector("#pixel-panel"),
@@ -59,6 +75,19 @@ const layerText = {
   velocity: { title: "Velocity" },
   deformation: { title: "Deformation" },
   coherence: { title: "Coherence" },
+};
+
+const QUALITY_PRESETS = {
+  lenient: {
+    coherence: 0.2,
+    stability: 0.2,
+    goodPairRatio: 1 / 3,
+  },
+  strict: {
+    coherence: 0.4,
+    stability: 0.15,
+    goodPairRatio: 2 / 3,
+  },
 };
 
 async function fetchJson(url, options = {}) {
@@ -105,18 +134,15 @@ function getDisplayRange(values = getLayerValues()) {
     return state.data.layers.coherence.range;
   }
 
-  const coherence = state.data.layers.coherence.values;
   const visibleValues = [];
 
   for (let y = 0; y < values.length; y += 1) {
     for (let x = 0; x < values[y].length; x += 1) {
       const value = values[y][x];
-      const pixelCoherence = coherence[y][x];
       if (
         value !== null
         && !Number.isNaN(value)
-        && pixelCoherence !== null
-        && pixelCoherence >= state.coherenceThreshold
+        && pixelPassesFilter(y, x)
       ) {
         visibleValues.push(value);
       }
@@ -152,6 +178,81 @@ function percentile(sortedValues, percentileValue) {
 
 function isFilterableLayer() {
   return state.activeLayer === "velocity" || state.activeLayer === "deformation";
+}
+
+function totalPairCount() {
+  return state.data?.layers.n_good_pairs.n_pairs_total ?? 0;
+}
+
+function goodPairMinimumForQuality(quality) {
+  const total = totalPairCount();
+  if (!total) return 0;
+  const lenient = Math.max(1, Math.round(total * QUALITY_PRESETS.lenient.goodPairRatio));
+  const strict = Math.max(3, Math.round(total * QUALITY_PRESETS.strict.goodPairRatio));
+  return Math.round(lerp(lenient, strict, quality));
+}
+
+function thresholdsForQuality(quality) {
+  const t = clamp(quality, 0, 1);
+  return {
+    coherence: roundToStep(lerp(QUALITY_PRESETS.lenient.coherence, QUALITY_PRESETS.strict.coherence, t), 0.01),
+    stability: roundToStep(lerp(QUALITY_PRESETS.lenient.stability, QUALITY_PRESETS.strict.stability, t), 0.01),
+    goodPairs: goodPairMinimumForQuality(t),
+  };
+}
+
+function applyQualityThresholds(quality) {
+  state.qualityValue = clamp(quality, 0, 1);
+  state.qualityThresholds = thresholdsForQuality(state.qualityValue);
+}
+
+function lerp(start, end, t) {
+  return start + (end - start) * t;
+}
+
+function roundToStep(value, step) {
+  return Math.round(value / step) * step;
+}
+
+function pixelPassesFilter(row, col) {
+  if (!state.data) return false;
+
+  const thresholds = state.qualityThresholds;
+  const coherence = state.data.layers.coherence.values[row][col];
+  const stability = state.data.layers.coherence_stability.values[row][col];
+  const goodPairs = state.data.layers.n_good_pairs.values[row][col];
+  return coherence !== null
+    && stability !== null
+    && goodPairs !== null
+    && coherence >= thresholds.coherence
+    && stability < thresholds.stability
+    && goodPairs >= thresholds.goodPairs;
+}
+
+function visiblePixelSummary(values = getLayerValues()) {
+  if (!state.data || !values) return { visible: 0, total: 0, percent: 0 };
+
+  let visible = 0;
+  let total = 0;
+  for (let row = 0; row < values.length; row += 1) {
+    for (let col = 0; col < values[row].length; col += 1) {
+      total += 1;
+      const value = values[row][col];
+      if (
+        value !== null
+        && !Number.isNaN(value)
+        && pixelPassesFilter(row, col)
+      ) {
+        visible += 1;
+      }
+    }
+  }
+
+  return {
+    visible,
+    total,
+    percent: total ? Math.round((visible / total) * 100) : 0,
+  };
 }
 
 function colorForValue(value, range, layer) {
@@ -327,7 +428,6 @@ function drawRasterTile(ctx, coords, tileSize) {
   if (state.rasterRange.p02 === null && state.activeLayer !== "coherence") return;
 
   const values = state.rasterValues;
-  const coherence = state.data.layers.coherence.values;
   const latEdges = axisEdges(state.data.lat);
   const lonEdges = axisEdges(state.data.lon);
   const tileOrigin = L.point(coords.x * tileSize.x, coords.y * tileSize.y);
@@ -339,9 +439,7 @@ function drawRasterTile(ctx, coords, tileSize) {
 
     for (let col = 0; col < values[row].length; col += 1) {
       const value = values[row][col];
-      const pixelCoherence = coherence[row][col];
-      const hiddenByFilter = isFilterableLayer()
-        && (pixelCoherence === null || pixelCoherence < state.coherenceThreshold);
+      const hiddenByFilter = isFilterableLayer() && !pixelPassesFilter(row, col);
 
       if (hiddenByFilter || value === null || Number.isNaN(value)) continue;
 
@@ -492,6 +590,27 @@ function updateMapLabels() {
   els.latRange.textContent = `Latitude: ${formatNumber(bounds.lat_min, 5)} to ${formatNumber(bounds.lat_max, 5)}`;
 }
 
+function syncQualityControls() {
+  const thresholds = state.qualityThresholds;
+  const totalPairs = totalPairCount();
+  const goodPairSliderMax = totalPairs || Math.max(12, thresholds.goodPairs);
+
+  els.qualitySlider.value = state.qualityValue.toFixed(2);
+  els.qualityValue.textContent = state.qualityIsCustom ? "Custom" : state.qualityValue.toFixed(2);
+  els.coherenceThresholdSlider.value = thresholds.coherence.toFixed(2);
+  els.coherenceThresholdValue.textContent = thresholds.coherence.toFixed(2);
+  els.stabilityMaxSlider.value = thresholds.stability.toFixed(2);
+  els.stabilityMaxValue.textContent = thresholds.stability.toFixed(2);
+  els.goodPairsMinSlider.max = String(goodPairSliderMax);
+  els.goodPairsMinSlider.value = String(thresholds.goodPairs);
+  els.goodPairsMinValue.textContent = totalPairs
+    ? `${thresholds.goodPairs} / ${totalPairs}`
+    : String(thresholds.goodPairs);
+  els.qualityNote.textContent = state.qualityIsCustom
+    ? "Custom thresholds are active. Move Quality to link them again."
+    : "Higher quality keeps only pixels with stronger, more consistent observations.";
+}
+
 function updateControls() {
   els.layerButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.layer === state.activeLayer);
@@ -500,8 +619,13 @@ function updateControls() {
   els.datePanel.hidden = state.activeLayer !== "deformation";
   els.filterPanel.hidden = !isFilterableLayer();
   els.filterBadge.hidden = !isFilterableLayer();
-  els.filterBadge.textContent = `Filter active: >= ${state.coherenceThreshold.toFixed(2)}`;
-  els.coherenceValue.textContent = state.coherenceThreshold.toFixed(2);
+  syncQualityControls();
+  const visibleSummary = isFilterableLayer() ? visiblePixelSummary() : null;
+  const visibleText = visibleSummary
+    ? ` - ${visibleSummary.visible.toLocaleString()} px visible (${visibleSummary.percent}% of AOI)`
+    : "";
+  const qualityLabel = state.qualityIsCustom ? "Custom quality" : `Quality: ${state.qualityValue.toFixed(2)}`;
+  els.filterBadge.textContent = `${qualityLabel}${visibleText}`;
 
   if (state.data) {
     els.dateSlider.max = Math.max(0, state.data.dates.length - 1);
@@ -540,13 +664,20 @@ function updatePixelInfo() {
   const { row, col } = state.selectedPixel;
   const velocity = state.data.layers.velocity.values[row][col];
   const coherence = state.data.layers.coherence.values[row][col];
+  const stability = state.data.layers.coherence_stability.values[row][col];
+  const goodPairs = state.data.layers.n_good_pairs.values[row][col];
+  const totalPairs = state.data.layers.n_good_pairs.n_pairs_total;
+  const rmse = state.data.layers.rmse.values[row][col];
   const deformation = state.data.layers.deformation.values[state.dateIndex][row][col];
-  const passes = coherence !== null && coherence >= state.coherenceThreshold;
+  const passes = pixelPassesFilter(row, col);
 
   els.pixelLat.textContent = formatNumber(state.data.lat[row], 6);
   els.pixelLon.textContent = formatNumber(state.data.lon[col], 6);
   els.pixelVelocity.textContent = `${formatNumber(velocity)} mm/year`;
   els.pixelCoherence.textContent = formatNumber(coherence, 2);
+  els.pixelStability.textContent = formatNumber(stability, 2);
+  els.pixelGoodPairs.textContent = `${formatNumber(goodPairs, 0)} / ${totalPairs}`;
+  els.pixelRmse.textContent = `${formatNumber(rmse, 2)} mm`;
   els.pixelDeformation.textContent = `${formatNumber(deformation)} mm`;
   els.pixelPasses.textContent = isFilterableLayer() ? (passes ? "Yes" : "No") : "Not applied";
   els.pixelPanelSubtitle.textContent = `${formatNumber(state.data.lat[row], 5)}, ${formatNumber(state.data.lon[col], 5)}`;
@@ -557,6 +688,9 @@ function resetPixelInfo() {
   els.pixelLon.textContent = "Click the map";
   els.pixelVelocity.textContent = "-";
   els.pixelCoherence.textContent = "-";
+  els.pixelStability.textContent = "-";
+  els.pixelGoodPairs.textContent = "-";
+  els.pixelRmse.textContent = "-";
   els.pixelDeformation.textContent = "-";
   els.pixelPasses.textContent = "-";
   els.pixelPanelSubtitle.textContent = "No point selected";
@@ -661,6 +795,9 @@ async function loadProject(projectPath = "") {
       });
     }
     state.data = await fetchJson("/api/map-data");
+    if (!state.qualityIsCustom) {
+      applyQualityThresholds(state.qualityValue);
+    }
     state.dateIndex = 0;
     state.selectedPixel = null;
     minimizePixelPanel({ keepPanelVisible: false });
@@ -694,6 +831,9 @@ async function openProjectFromFolderPicker() {
     }
 
     state.data = await fetchJson("/api/map-data");
+    if (!state.qualityIsCustom) {
+      applyQualityThresholds(state.qualityValue);
+    }
     state.dateIndex = 0;
     state.selectedPixel = null;
     minimizePixelPanel({ keepPanelVisible: false });
@@ -743,8 +883,30 @@ els.dateSlider.addEventListener("input", () => {
   drawTimeSeries();
 });
 
-els.coherenceSlider.addEventListener("input", () => {
-  state.coherenceThreshold = Number(els.coherenceSlider.value);
+els.qualitySlider.addEventListener("input", () => {
+  state.qualityIsCustom = false;
+  applyQualityThresholds(Number(els.qualitySlider.value));
+  updateControls();
+  drawMap();
+});
+
+els.coherenceThresholdSlider.addEventListener("input", () => {
+  state.qualityIsCustom = true;
+  state.qualityThresholds.coherence = Number(els.coherenceThresholdSlider.value);
+  updateControls();
+  drawMap();
+});
+
+els.stabilityMaxSlider.addEventListener("input", () => {
+  state.qualityIsCustom = true;
+  state.qualityThresholds.stability = Number(els.stabilityMaxSlider.value);
+  updateControls();
+  drawMap();
+});
+
+els.goodPairsMinSlider.addEventListener("input", () => {
+  state.qualityIsCustom = true;
+  state.qualityThresholds.goodPairs = Number(els.goodPairsMinSlider.value);
   updateControls();
   drawMap();
 });

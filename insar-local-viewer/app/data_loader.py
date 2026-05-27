@@ -14,6 +14,8 @@ NETCDF_PRIORITY = [
 VELOCITY_CANDIDATES = ["sbas_velocity_raw", "sbas_velocity_masked"]
 DISPLACEMENT_CANDIDATES = ["sbas_displacement_raw", "sbas_displacement_masked"]
 COHERENCE_CANDIDATES = ["coherence_median", "coherence_mean"]
+RMSE_CANDIDATES = ["sbas_rmse_raw", "sbas_rmse_masked"]
+COHERENCE_STACK_NAME = "coherence_stack"
 
 
 class ProjectDataError(Exception):
@@ -87,10 +89,17 @@ def get_map_data(project_dir: Path) -> dict:
         _require_product(products, "velocity")
         _require_product(products, "deformation")
         _require_product(products, "coherence")
+        _require_product(products, "rmse")
+        _require_product(products, "coherence_stack")
 
         velocity = _read_2d(dataset, products["velocity"])
         coherence = _read_2d(dataset, products["coherence"])
         displacement = _read_3d(dataset, products["deformation"])
+        rmse = _read_2d(dataset, products["rmse"])
+        coherence_stack = _read_coherence_stack(dataset, products["coherence_stack"])
+        n_pairs_total = int(coherence_stack.shape[0])
+        coherence_stability = coherence_stack.std(axis=0).astype("float32")
+        n_good_pairs = (coherence_stack >= 0.3).sum(axis=0).astype("int16")
 
         return {
             "project": {
@@ -120,6 +129,19 @@ def get_map_data(project_dir: Path) -> dict:
                     "values": _array_to_json(coherence),
                     "range": {"min": 0.0, "max": 1.0, "p02": 0.0, "p98": 1.0},
                     "unit": "unitless",
+                },
+                "rmse": {
+                    "values": _array_to_json(rmse),
+                    "unit": "mm",
+                },
+                "coherence_stability": {
+                    "values": _array_to_json(coherence_stability),
+                    "unit": "unitless",
+                },
+                "n_good_pairs": {
+                    "values": _array_to_json(n_good_pairs),
+                    "unit": "count",
+                    "n_pairs_total": n_pairs_total,
                 },
             },
         }
@@ -195,6 +217,8 @@ def _resolve_products(dataset):
         "velocity": _first_existing_var(dataset, VELOCITY_CANDIDATES),
         "deformation": _first_existing_var(dataset, DISPLACEMENT_CANDIDATES),
         "coherence": _first_existing_var(dataset, COHERENCE_CANDIDATES),
+        "rmse": _first_existing_var(dataset, RMSE_CANDIDATES),
+        "coherence_stack": COHERENCE_STACK_NAME if COHERENCE_STACK_NAME in dataset.data_vars else None,
     }
 
 
@@ -222,6 +246,13 @@ def _read_3d(dataset, variable_name):
     if variable.ndim != 3 or set(variable.dims) != {"date", "lat", "lon"}:
         raise ProjectDataError(f"Expected {variable_name} to be a 3D date/lat/lon layer")
     return np.asarray(variable.transpose("date", "lat", "lon").values, dtype=float)
+
+
+def _read_coherence_stack(dataset, variable_name):
+    variable = dataset[variable_name]
+    if variable.ndim != 3 or set(variable.dims) != {"pair", "lat", "lon"}:
+        raise ProjectDataError(f"Expected {variable_name} to be a 3D pair/lat/lon layer")
+    return np.asarray(variable.transpose("pair", "lat", "lon").values, dtype=float)
 
 
 def _bounds(lat, lon):

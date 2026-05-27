@@ -337,6 +337,22 @@ button:active {
   margin: 10px 0 0;
 }
 
+.advanced-section {
+  border-top: 1px solid var(--border);
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.advanced-section summary {
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.advanced-control {
+  margin-top: 14px;
+}
+
 .map-panel {
   display: grid;
   grid-template-rows: auto minmax(620px, 1fr) auto;
@@ -531,6 +547,16 @@ button:active {
 .pixel-list.compact dt {
   font-size: 0.68rem;
   margin-bottom: 3px;
+}
+
+.metric-hint {
+  color: var(--muted);
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin-top: 2px;
+  text-transform: none;
 }
 
 .pixel-list.compact dd {

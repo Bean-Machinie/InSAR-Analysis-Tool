@@ -67,10 +67,29 @@
           </section>
 
           <section id="filter-panel" class="panel">
-            <h2>Coherence Filter</h2>
-            <label for="coherence-slider">Visual threshold</label>
-            <input id="coherence-slider" type="range" min="0" max="1" value="0.3" step="0.01">
-            <div class="control-value">Coherence filter: >= <span id="coherence-value">0.30</span></div>
+            <h2>Quality Filter</h2>
+            <label for="quality-slider">Quality</label>
+            <input id="quality-slider" type="range" min="0" max="1" value="0.5" step="0.01">
+            <div class="control-value">Quality: <span id="quality-value">0.50</span></div>
+            <p id="quality-note" class="note">Higher quality keeps only pixels with stronger, more consistent observations.</p>
+            <details id="advanced-filter" class="advanced-section">
+              <summary>Advanced</summary>
+              <div class="advanced-control">
+                <label for="coherence-threshold-slider">Median coherence</label>
+                <input id="coherence-threshold-slider" type="range" min="0" max="1" value="0.3" step="0.01">
+                <div class="control-value">Minimum: <span id="coherence-threshold-value">0.30</span></div>
+              </div>
+              <div class="advanced-control">
+                <label for="stability-max-slider">Stability (std)</label>
+                <input id="stability-max-slider" type="range" min="0" max="0.5" value="0.18" step="0.01">
+                <div class="control-value">Maximum: <span id="stability-max-value">0.18</span></div>
+              </div>
+              <div class="advanced-control">
+                <label for="good-pairs-min-slider">Good pairs</label>
+                <input id="good-pairs-min-slider" type="range" min="0" max="12" value="6" step="1">
+                <div class="control-value">Minimum: <span id="good-pairs-min-value">6</span></div>
+              </div>
+            </details>
           </section>
 
           <section class="panel">
@@ -90,7 +109,7 @@
             <div>
               <h2 id="active-layer-title">Velocity</h2>
             </div>
-            <div id="active-filter-badge" class="filter-badge">Filter active: >= 0.30</div>
+            <div id="active-filter-badge" class="filter-badge">Quality: 0.50</div>
           </div>
           <div class="map-frame" id="map-frame">
             <div id="map"></div>
@@ -118,8 +137,20 @@
                     <dd id="pixel-velocity">-</dd>
                   </div>
                   <div>
-                    <dt>Coherence</dt>
+                    <dt>Median coherence <span class="metric-hint">high = good</span></dt>
                     <dd id="pixel-coherence">-</dd>
+                  </div>
+                  <div>
+                    <dt>Stability (std) <span class="metric-hint">low = good</span></dt>
+                    <dd id="pixel-stability">-</dd>
+                  </div>
+                  <div>
+                    <dt>Good pairs <span class="metric-hint">high = good</span></dt>
+                    <dd id="pixel-good-pairs">-</dd>
+                  </div>
+                  <div>
+                    <dt>RMSE <span class="metric-hint">low = good</span></dt>
+                    <dd id="pixel-rmse">-</dd>
                   </div>
                   <div>
                     <dt>Current deformation</dt>
