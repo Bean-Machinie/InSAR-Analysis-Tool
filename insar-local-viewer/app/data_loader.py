@@ -127,13 +127,14 @@ def get_map_data(project_dir: Path) -> dict:
                     "range": _robust_range(displacement, center_zero=True),
                     "unit": "mm",
                 },
-                "coherence": {
-                    "values": _array_to_json(coherence),
-                    "stack": _array_to_json(coherence_stack),
-                    "pairs": coherence_pairs,
-                    "range": {"min": 0.0, "max": 1.0, "p02": 0.0, "p98": 1.0},
-                    "unit": "unitless",
-                },
+        "coherence": {
+            "values": _array_to_json(coherence),
+            "stack": _array_to_json(coherence_stack),
+            "pairs": coherence_pairs,
+            "pair_baselines_days": [_pair_baseline_days(pair) for pair in coherence_pairs],
+            "range": {"min": 0.0, "max": 1.0, "p02": 0.0, "p98": 1.0},
+            "unit": "unitless",
+        },
                 "rmse": {
                     "values": _array_to_json(rmse),
                     "unit": "mm",
@@ -221,6 +222,18 @@ def _pair_strings(dataset):
         return []
     values = np.asarray(dataset.coords["pair"].values)
     return [str(value) for value in values]
+
+
+def _pair_baseline_days(pair_label: str):
+    parts = str(pair_label).split()
+    if len(parts) < 2:
+        return None
+    try:
+        start = np.datetime64(parts[0], "D")
+        end = np.datetime64(parts[1], "D")
+    except ValueError:
+        return None
+    return int(abs((end - start).astype("timedelta64[D]").astype(int)))
 
 
 def _resolve_products(dataset):

@@ -551,7 +551,7 @@ button:active {
   bottom: 16px;
   box-shadow: var(--shadow-md);
   display: grid;
-  gap: 8px;
+  gap: 9px;
   left: 50%;
   max-width: calc(100% - 32px);
   min-width: min(460px, calc(100% - 32px));
@@ -579,11 +579,66 @@ button:active {
   white-space: nowrap;
 }
 
+.baseline-summary {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(96px, 1fr) auto;
+  padding: 8px 10px;
+}
+
+.baseline-summary span,
+.baseline-range,
+.pair-dates {
+  color: var(--muted);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.baseline-summary strong {
+  color: var(--text);
+  display: block;
+  font-size: 1rem;
+  line-height: 1.1;
+  margin-top: 2px;
+}
+
+.baseline-meter {
+  background: #e7e5dc;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.baseline-meter span {
+  background: linear-gradient(90deg, #32a383, var(--accent));
+  display: block;
+  height: 100%;
+  min-width: 6px;
+  width: 0%;
+}
+
+.baseline-range {
+  text-align: right;
+  white-space: nowrap;
+}
+
 .coherence-dock-controls {
   align-items: center;
   display: grid;
   gap: 10px;
   grid-template-columns: 32px minmax(0, 1fr) 32px;
+}
+
+.pair-dates {
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .step-button {
@@ -818,6 +873,16 @@ button:active {
   }
 
   .coherence-dock-header .control-value {
+    text-align: left;
+    white-space: normal;
+  }
+
+  .baseline-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .baseline-range,
+  .pair-dates {
     text-align: left;
     white-space: normal;
   }

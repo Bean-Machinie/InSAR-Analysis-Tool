@@ -42,6 +42,10 @@ const els = {
   coherencePairPanel: document.querySelector("#coherence-pair-panel"),
   coherencePairSlider: document.querySelector("#coherence-pair-slider"),
   coherencePairValue: document.querySelector("#coherence-pair-value"),
+  coherenceBaselineValue: document.querySelector("#coherence-baseline-value"),
+  coherenceBaselineFill: document.querySelector("#coherence-baseline-fill"),
+  coherenceBaselineRange: document.querySelector("#coherence-baseline-range"),
+  coherencePairDates: document.querySelector("#coherence-pair-dates"),
   coherencePairPrev: document.querySelector("#coherence-pair-prev"),
   coherencePairNext: document.querySelector("#coherence-pair-next"),
   filterPanel: document.querySelector("#filter-panel"),
@@ -128,6 +132,10 @@ function getCoherenceValues() {
 
 function getCoherencePairs() {
   return state.data?.layers.coherence.pairs ?? [];
+}
+
+function getCoherenceBaselines() {
+  return state.data?.layers.coherence.pair_baselines_days ?? [];
 }
 
 function getLayerRange(layer = state.activeLayer) {
@@ -626,18 +634,46 @@ function updateControls() {
     state.coherencePairIndex = clamp(state.coherencePairIndex, 0, maxPairIndex);
     els.coherencePairSlider.max = maxPairIndex;
     els.coherencePairSlider.value = state.coherencePairIndex;
-    els.coherencePairValue.textContent = coherencePairLabel(state.coherencePairIndex);
+    els.coherencePairValue.textContent = coherencePairIndexLabel(state.coherencePairIndex);
+    els.coherencePairDates.textContent = coherencePairDatesLabel(state.coherencePairIndex);
+    updateCoherenceBaselineSummary(state.coherencePairIndex);
     els.coherencePairPrev.disabled = state.coherencePairIndex <= 0;
     els.coherencePairNext.disabled = state.coherencePairIndex >= maxPairIndex;
   }
 }
 
-function coherencePairLabel(index) {
+function coherencePairIndexLabel(index) {
   const pairs = getCoherencePairs();
   if (!pairs.length) return "Median coherence";
+  return `${index + 1} / ${pairs.length}`;
+}
+
+function coherencePairDatesLabel(index) {
+  const pairs = getCoherencePairs();
+  if (!pairs.length) return "-";
   const label = pairs[index] || pairs[0];
-  const readable = label.replace(/\s+/, " to ");
-  return `${index + 1} / ${pairs.length}: ${readable}`;
+  return label.replace(/\s+/, " to ");
+}
+
+function updateCoherenceBaselineSummary(index) {
+  const baselines = getCoherenceBaselines().filter((value) => value !== null && value !== undefined);
+  const baseline = getCoherenceBaselines()[index];
+
+  if (baseline === null || baseline === undefined || !baselines.length) {
+    els.coherenceBaselineValue.textContent = "n/a";
+    els.coherenceBaselineRange.textContent = "No temporal baseline available";
+    els.coherenceBaselineFill.style.width = "0%";
+    return;
+  }
+
+  const minBaseline = Math.min(...baselines);
+  const maxBaseline = Math.max(...baselines);
+  const spread = Math.max(1, maxBaseline - minBaseline);
+  const percent = ((baseline - minBaseline) / spread) * 100;
+
+  els.coherenceBaselineValue.textContent = `${baseline} days`;
+  els.coherenceBaselineRange.textContent = `${minBaseline}-${maxBaseline} days in stack`;
+  els.coherenceBaselineFill.style.width = `${clamp(percent, 0, 100)}%`;
 }
 
 function updateStatusFooter() {

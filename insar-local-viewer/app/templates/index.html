@@ -131,11 +131,22 @@
                 <label for="coherence-pair-slider">Coherence pair</label>
                 <div class="control-value" id="coherence-pair-value">-</div>
               </div>
+              <div class="baseline-summary">
+                <div>
+                  <span>Temporal baseline</span>
+                  <strong id="coherence-baseline-value">-</strong>
+                </div>
+                <div class="baseline-meter" aria-hidden="true">
+                  <span id="coherence-baseline-fill"></span>
+                </div>
+                <div id="coherence-baseline-range" class="baseline-range">-</div>
+              </div>
               <div class="coherence-dock-controls">
                 <button id="coherence-pair-prev" class="step-button" type="button" aria-label="Previous coherence pair">&lsaquo;</button>
                 <input id="coherence-pair-slider" type="range" min="0" max="0" value="0" step="1">
                 <button id="coherence-pair-next" class="step-button" type="button" aria-label="Next coherence pair">&rsaquo;</button>
               </div>
+              <div id="coherence-pair-dates" class="pair-dates">-</div>
             </section>
             <section id="pixel-panel" class="floating-panel" aria-label="Pixel inspector" hidden>
               <div id="pixel-panel-header" class="floating-panel-header">
