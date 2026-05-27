@@ -1,0 +1,394 @@
+{
+  "created": "2026-05-27T12:36:57.713042+00:00",
+  "output_directory": "outputs/project_D",
+  "files": [
+    {
+      "path": "outputs/project_D/results_tight.nc",
+      "size_mb": 3.073567
+    },
+    {
+      "path": "outputs/project_D/sbas_results_masked.npz",
+      "size_mb": 2.261406
+    },
+    {
+      "path": "outputs/project_D/results_wide.nc",
+      "size_mb": 40.154324
+    },
+    {
+      "path": "outputs/project_D/sbas_results_metadata.json",
+      "size_mb": 0.004132
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20190117.tif",
+      "size_mb": 0.041197
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20190129.tif",
+      "size_mb": 0.014084
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180603.tif",
+      "size_mb": 0.004098
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180919.tif",
+      "size_mb": 0.003112
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20190105.tif",
+      "size_mb": 0.043545
+    },
+    {
+      "path": "outputs/project_D/geotiffs/landmask.tif",
+      "size_mb": 0.001385
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20181025.tif",
+      "size_mb": 0.017086
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180907.tif",
+      "size_mb": 0.041035
+    },
+    {
+      "path": "outputs/project_D/geotiffs/coherence_mean.tif",
+      "size_mb": 0.040388
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180603.tif",
+      "size_mb": 0.04127
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180627.tif",
+      "size_mb": 0.041202
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180907.tif",
+      "size_mb": 0.003154
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20181130.tif",
+      "size_mb": 0.043593
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180615.tif",
+      "size_mb": 0.041356
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_pixel_mask.tif",
+      "size_mb": 0.00241
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20190117.tif",
+      "size_mb": 0.016653
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180919.tif",
+      "size_mb": 0.040979
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180814.tif",
+      "size_mb": 0.003308
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20190105.tif",
+      "size_mb": 0.00305
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180709.tif",
+      "size_mb": 0.025611
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180826.tif",
+      "size_mb": 0.019235
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20181212.tif",
+      "size_mb": 0.014153
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180814.tif",
+      "size_mb": 0.043626
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20190129.tif",
+      "size_mb": 0.04349
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20181130.tif",
+      "size_mb": 0.01714
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180919.tif",
+      "size_mb": 0.015408
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20190117.tif",
+      "size_mb": 0.003558
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20190117.tif",
+      "size_mb": 0.043578
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20190129.tif",
+      "size_mb": 0.041112
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180907.tif",
+      "size_mb": 0.0169
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20190105.tif",
+      "size_mb": 0.013442
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20190105.tif",
+      "size_mb": 0.040971
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180709.tif",
+      "size_mb": 0.00391
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180826.tif",
+      "size_mb": 0.003386
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180709.tif",
+      "size_mb": 0.043731
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20181212.tif",
+      "size_mb": 0.040999
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20181001.tif",
+      "size_mb": 0.016172
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180721.tif",
+      "size_mb": 0.041268
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20181106.tif",
+      "size_mb": 0.00347
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180826.tif",
+      "size_mb": 0.041097
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20181118.tif",
+      "size_mb": 0.043542
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20181118.tif",
+      "size_mb": 0.013377
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20181001.tif",
+      "size_mb": 0.043589
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180721.tif",
+      "size_mb": 0.022283
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180603.tif",
+      "size_mb": 0.004123
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20181212.tif",
+      "size_mb": 0.003167
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180802.tif",
+      "size_mb": 0.041306
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20181013.tif",
+      "size_mb": 0.043553
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20181001.tif",
+      "size_mb": 0.00327
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20181013.tif",
+      "size_mb": 0.014108
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180802.tif",
+      "size_mb": 0.043608
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20181001.tif",
+      "size_mb": 0.041174
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20181118.tif",
+      "size_mb": 0.003064
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20181224.tif",
+      "size_mb": 0.04358
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20181224.tif",
+      "size_mb": 0.003581
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20190129.tif",
+      "size_mb": 0.003387
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20181106.tif",
+      "size_mb": 0.041212
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20181106.tif",
+      "size_mb": 0.017136
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20181025.tif",
+      "size_mb": 0.041258
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20181106.tif",
+      "size_mb": 0.043607
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180709.tif",
+      "size_mb": 0.041262
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20181118.tif",
+      "size_mb": 0.040922
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180627.tif",
+      "size_mb": 0.003625
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180814.tif",
+      "size_mb": 0.018346
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20181013.tif",
+      "size_mb": 0.003099
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180615.tif",
+      "size_mb": 0.026515
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20181025.tif",
+      "size_mb": 0.043558
+    },
+    {
+      "path": "outputs/project_D/geotiffs/coherence_median.tif",
+      "size_mb": 0.040373
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180615.tif",
+      "size_mb": 0.043949
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180802.tif",
+      "size_mb": 0.021054
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180627.tif",
+      "size_mb": 0.043719
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20181130.tif",
+      "size_mb": 0.041175
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20181013.tif",
+      "size_mb": 0.041001
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_velocity_raw.tif",
+      "size_mb": 0.043528
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20181025.tif",
+      "size_mb": 0.00359
+    },
+    {
+      "path": "outputs/project_D/geotiffs/topography.tif",
+      "size_mb": 0.039628
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_rmse_masked.tif",
+      "size_mb": 0.013724
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180919.tif",
+      "size_mb": 0.04356
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20181212.tif",
+      "size_mb": 0.043567
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180802.tif",
+      "size_mb": 0.003536
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20180814.tif",
+      "size_mb": 0.041144
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180826.tif",
+      "size_mb": 0.043552
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180721.tif",
+      "size_mb": 0.04366
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20181130.tif",
+      "size_mb": 0.003546
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180615.tif",
+      "size_mb": 0.004023
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_velocity_masked.tif",
+      "size_mb": 0.014181
+    },
+    {
+      "path": "outputs/project_D/geotiffs/pairwise_coherence_attributed_to_date_20181224.tif",
+      "size_mb": 0.041206
+    },
+    {
+      "path": "outputs/project_D/geotiffs/valid_time_mask_20180721.tif",
+      "size_mb": 0.003699
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20181224.tif",
+      "size_mb": 0.016783
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_rmse_raw.tif",
+      "size_mb": 0.041796
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_masked_20180627.tif",
+      "size_mb": 0.022594
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180603.tif",
+      "size_mb": 0.00138
+    },
+    {
+      "path": "outputs/project_D/geotiffs/sbas_displacement_raw_20180907.tif",
+      "size_mb": 0.043549
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "project": "project",
+  "orbit_direction": "D",
+  "start_date": "2018-06-01",
+  "end_date": "2019-02-01",
+  "event_date": "2019-01-25",
+  "output_directory": "outputs/project_D",
+  "aoi": {
+    "raw_bounds_lonlat": {
+      "min_lon": -44.13070837967401,
+      "min_lat": -20.12937313017449,
+      "max_lon": -44.11084119189669,
+      "max_lat": -20.112580724639844
+    },
+    "tight_export_bounds_lonlat": {
+      "min_lon": -44.135708379674014,
+      "min_lat": -20.134373130174488,
+      "max_lon": -44.10584119189669,
+      "max_lat": -20.107580724639845
+    },
+    "buffer_deg": 0.05,
+    "export_pad_deg": 0.005
+  },
+  "processing": {
+    "geocode_resolution_m": 15.0,
+    "sbas_days": 70,
+    "sbas_wavelength_m": 60.0,
+    "sbas_coarsen": [
+      2,
+      8
+    ],
+    "sbas_limit": 2,
+    "cover_best": 2,
+    "use_best_pairs": true,
+    "use_landmask": true
+  },
+  "coherence_masking": {
+    "coherence_threshold": 0.3,
+    "coherence_mask_method": "median",
+    "enable_dynamic_coh_mask": true,
+    "enable_segmented_relative_output": false,
+    "segmentation_exported": false,
+    "valid_pixel_mask_definition": "Static mask where coherence summary is greater than or equal to COH_THRESHOLD.",
+    "valid_time_mask_definition": "Dynamic mask where date-attributed pairwise coherence is greater than or equal to COH_THRESHOLD."
+  },
+  "variables": {
+    "sbas_displacement_raw": {
+      "units": "mm",
+      "description": "Raw SBAS cumulative LOS displacement from PyGMTSAR LSQ inversion."
+    },
+    "sbas_displacement_masked": {
+      "units": "mm",
+      "description": "Raw SBAS cumulative LOS displacement masked by dynamic coherence."
+    },
+    "sbas_velocity_raw": {
+      "units": "mm/year",
+      "description": "Raw SBAS LOS velocity. For short stacks, interpret cautiously."
+    },
+    "sbas_velocity_masked": {
+      "units": "mm/year",
+      "description": "Coherence-masked SBAS LOS velocity."
+    },
+    "sbas_rmse_raw": {
+      "units": "mm",
+      "description": "Raw SBAS RMSE converted to LOS millimetres."
+    },
+    "sbas_rmse_masked": {
+      "units": "mm",
+      "description": "Coherence-masked SBAS RMSE."
+    },
+    "coherence_mean": {
+      "units": "1",
+      "description": "Mean pairwise interferometric coherence."
+    },
+    "coherence_median": {
+      "units": "1",
+      "description": "Median pairwise interferometric coherence."
+    },
+    "valid_pixel_mask": {
+      "units": "1",
+      "description": "Static coherence mask. 1=valid, 0=invalid."
+    },
+    "valid_time_mask": {
+      "units": "1",
+      "description": "Dynamic date-dependent coherence mask. 1=valid, 0=invalid."
+    },
+    "pairwise_coherence_attributed_to_date": {
+      "units": "1",
+      "description": "Approximate per-acquisition quality layer. Computed by averaging pairwise interferogram coherence values for all pairs that include each acquisition date. This is not a direct single-date coherence measurement."
+    },
+    "coherence_pair_count_per_date": {
+      "units": "count",
+      "description": "Number of pairwise interferogram coherence layers contributing to pairwise_coherence_attributed_to_date for each acquisition date."
+    },
+    "topography": {
+      "units": "m",
+      "description": "Topography used during processing."
+    },
+    "landmask": {
+      "units": "1",
+      "description": "Landmask where available. 1=land, 0=water/no-data."
+    }
+  },
+  "files": {
+    "results_wide_nc": "outputs/project_D/results_wide.nc",
+    "results_tight_nc": "outputs/project_D/results_tight.nc",
+    "npz": "outputs/project_D/sbas_results_masked.npz",
+    "geotiff_directory": "outputs/project_D/geotiffs"
+  },
+  "scientific_notes": [
+    "pairwise_coherence_attributed_to_date is a quality-control product derived from pairwise coherence. It should not be described as true single-date coherence.",
+    "Segmentation output is intentionally disabled in this workflow. Use sbas_displacement_raw or sbas_displacement_masked for interpretation.",
+    "Annualized velocity from short time windows can be unstable and may reflect atmosphere, event discontinuities, or unwrapping artifacts."
+  ]
+}
