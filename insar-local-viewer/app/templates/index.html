@@ -120,7 +120,19 @@
         <section class="map-panel" aria-label="Map view">
           <div class="map-frame" id="map-frame">
             <div id="map"></div>
+            <div id="map-3d" class="map-3d" aria-label="3D terrain map" hidden></div>
             <div id="map-placeholder" class="map-placeholder">Load a processed project folder to display the map.</div>
+            <div class="map-toolbar" aria-label="Map view controls">
+              <button id="view-3d-toggle" class="map-toggle-button" type="button" aria-pressed="false" title="Toggle 3D view. Drag to orbit, Shift-drag or right-drag to pan, scroll to zoom.">
+                <span class="terrain-icon" aria-hidden="true"></span>
+                <span>3D</span>
+              </button>
+              <div id="vertical-exaggeration-control" class="exaggeration-control" hidden>
+                <label for="vertical-exaggeration-slider">Relief</label>
+                <input id="vertical-exaggeration-slider" type="range" min="1" max="5" value="1.5" step="0.1">
+                <span id="vertical-exaggeration-value">1.5x</span>
+              </div>
+            </div>
             <section id="date-panel" class="date-dock">
               <label for="date-slider">Acquisition date</label>
               <input id="date-slider" type="range" min="0" max="0" value="0" step="1">
@@ -165,6 +177,10 @@
                   <div>
                     <dt>Longitude</dt>
                     <dd id="pixel-lon">Click the map</dd>
+                  </div>
+                  <div>
+                    <dt>Elevation</dt>
+                    <dd id="pixel-elevation">-</dd>
                   </div>
                   <div>
                     <dt>Velocity</dt>

@@ -15,6 +15,7 @@ VELOCITY_CANDIDATES = ["sbas_velocity_raw", "sbas_velocity_masked"]
 DISPLACEMENT_CANDIDATES = ["sbas_displacement_raw", "sbas_displacement_masked"]
 COHERENCE_CANDIDATES = ["coherence_median", "coherence_mean"]
 RMSE_CANDIDATES = ["sbas_rmse_raw", "sbas_rmse_masked"]
+DEM_CANDIDATES = ["dem", "elevation", "topography"]
 COHERENCE_STACK_NAME = "coherence_stack"
 COHERENCE_DATE_STACK_CANDIDATES = ["coherence_per_date", "pairwise_coherence_attributed_to_date"]
 
@@ -103,6 +104,7 @@ def get_project_info(project_dir: Path) -> dict:
                 "velocity": products["velocity"] is not None,
                 "deformation": products["deformation"] is not None,
                 "coherence": products["coherence"] is not None,
+                "terrain": products["dem"] is not None,
             },
             "lat_count": int(lat.size),
             "lon_count": int(lon.size),
@@ -133,6 +135,7 @@ def get_map_data(project_dir: Path) -> dict:
         coherence = _read_2d(dataset, products["coherence"])
         displacement = _read_3d(dataset, products["deformation"])
         rmse = _read_2d(dataset, products["rmse"])
+        dem = _read_optional_2d(dataset, products["dem"])
         coherence_stack, coherence_labels, coherence_baselines, coherence_stack_kind = _read_coherence_display_stack(
             dataset,
             products,
@@ -189,6 +192,12 @@ def get_map_data(project_dir: Path) -> dict:
                     "values": _array_to_json(n_good_pairs),
                     "unit": "count",
                     "n_pairs_total": n_pairs_total,
+                },
+                "terrain": {
+                    "values": _array_to_json(dem) if dem is not None else None,
+                    "range": _robust_range(dem) if dem is not None else {"min": None, "max": None, "p02": None, "p98": None},
+                    "unit": "m",
+                    "source": products["dem"] or "flat-fallback",
                 },
             },
         }
@@ -284,6 +293,7 @@ def _resolve_products(dataset):
         "deformation": _first_existing_var(dataset, DISPLACEMENT_CANDIDATES),
         "coherence": _first_existing_var(dataset, COHERENCE_CANDIDATES),
         "rmse": _first_existing_var(dataset, RMSE_CANDIDATES),
+        "dem": _first_existing_var(dataset, DEM_CANDIDATES),
         "coherence_stack": COHERENCE_STACK_NAME if COHERENCE_STACK_NAME in dataset.data_vars else None,
         "coherence_date_stack": _first_existing_var(dataset, COHERENCE_DATE_STACK_CANDIDATES),
     }
@@ -306,6 +316,12 @@ def _read_2d(dataset, variable_name):
     if variable.ndim != 2 or set(variable.dims) != {"lat", "lon"}:
         raise ProjectDataError(f"Expected {variable_name} to be a 2D lat/lon layer")
     return np.asarray(variable.transpose("lat", "lon").values, dtype=float)
+
+
+def _read_optional_2d(dataset, variable_name):
+    if variable_name is None:
+        return None
+    return _read_2d(dataset, variable_name)
 
 
 def _read_3d(dataset, variable_name):

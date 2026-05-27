@@ -17,6 +17,11 @@ const state = {
   rasterRange: null,
   selectedPixelLayer: null,
   hasFitProjectBounds: false,
+  is3D: localStorage.getItem("insar-view-mode") === "3d",
+  verticalExaggeration: Number(localStorage.getItem("insar-vertical-exaggeration")) || 1.5,
+  scene3D: null,
+  is3DAnimating: false,
+  threePromise: null,
 };
 
 const els = {
@@ -64,9 +69,15 @@ const els = {
   legendMax: document.querySelector("#legend-max"),
   mapFrame: document.querySelector("#map-frame"),
   map: document.querySelector("#map"),
+  map3d: document.querySelector("#map-3d"),
   mapPlaceholder: document.querySelector("#map-placeholder"),
+  view3dToggle: document.querySelector("#view-3d-toggle"),
+  verticalExaggerationControl: document.querySelector("#vertical-exaggeration-control"),
+  verticalExaggerationSlider: document.querySelector("#vertical-exaggeration-slider"),
+  verticalExaggerationValue: document.querySelector("#vertical-exaggeration-value"),
   pixelLat: document.querySelector("#pixel-lat"),
   pixelLon: document.querySelector("#pixel-lon"),
+  pixelElevation: document.querySelector("#pixel-elevation"),
   pixelVelocity: document.querySelector("#pixel-velocity"),
   pixelCoherenceLabel: document.querySelector("#pixel-coherence-label"),
   pixelCoherence: document.querySelector("#pixel-coherence"),
@@ -88,6 +99,21 @@ const layerText = {
   deformation: { title: "Deformation" },
   coherence: { title: "Coherence" },
 };
+
+const THREE_VIEW_CONFIG = {
+  threeModuleUrl: "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  demSource: "netcdf-dem",
+  satelliteTileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  terrainTextureZoom: 15,
+  terrainMeshMaxAxis: 180,
+  maxTextureTilesPerAxis: 8,
+  verticalOffsetMeters: 4,
+  panSensitivity: 0.00055,
+  orbitSensitivity: 0.009,
+  tiltSensitivity: 0.006,
+};
+
+state.verticalExaggeration = clamp(state.verticalExaggeration, 1, 5);
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
@@ -113,6 +139,22 @@ function formatNumber(value, digits = 3) {
 
 function getBounds() {
   return state.data.project.bounds;
+}
+
+function getElevation(row, col) {
+  const terrain = state.data?.layers.terrain?.values;
+  const value = terrain?.[row]?.[col];
+  return value === null || value === undefined || Number.isNaN(value) ? 0 : value;
+}
+
+function getElevationDatum() {
+  const range = state.data?.layers.terrain?.range;
+  if (!range || range.min === null || range.max === null) return 0;
+  return (range.min + range.max) / 2;
+}
+
+function hasTerrainDem() {
+  return Boolean(state.data?.layers.terrain?.values);
 }
 
 function getLayerValues(layer = state.activeLayer) {
@@ -371,9 +413,11 @@ function initializeMap() {
 
 function drawMap() {
   initializeMap();
+  syncViewMode();
 
   if (!state.data) {
     els.mapPlaceholder.hidden = false;
+    update3DScene();
     updateLegend();
     return;
   }
@@ -384,14 +428,21 @@ function drawMap() {
   const range = getDisplayRange(state.activeLayer, values);
   state.rasterValues = values;
   state.rasterRange = range;
-  updateRasterLayer();
+  if (state.is3D) {
+    update3DScene();
+  } else {
+    updateRasterLayer();
+  }
 
   if (!state.hasFitProjectBounds) {
     state.map.fitBounds(bounds, { padding: [28, 28] });
     state.hasFitProjectBounds = true;
   }
 
-  drawSelectedPixel();
+  if (!state.is3D) {
+    drawSelectedPixel();
+  }
+  update3DSelection();
   updateLegend();
   updatePixelInfo();
 }
@@ -647,6 +698,698 @@ function nearestIndex(values, target) {
   return bestIndex;
 }
 
+function syncViewMode() {
+  els.view3dToggle.setAttribute("aria-pressed", String(state.is3D));
+  els.verticalExaggerationControl.hidden = !state.is3D;
+  els.verticalExaggerationSlider.value = String(state.verticalExaggeration);
+  els.verticalExaggerationValue.textContent = `${state.verticalExaggeration.toFixed(1)}x`;
+  els.map.hidden = state.is3D;
+  els.map3d.hidden = !state.is3D;
+
+  if (state.is3D) {
+    if (state.rasterLayer) {
+      state.rasterLayer.remove();
+      state.rasterLayer = null;
+    }
+    if (state.selectedPixelLayer) {
+      state.selectedPixelLayer.remove();
+      state.selectedPixelLayer = null;
+    }
+    requestAnimationFrame(() => resize3DScene());
+  } else {
+    stop3DAnimation();
+    requestAnimationFrame(() => state.map?.invalidateSize());
+  }
+}
+
+function update3DScene() {
+  if (!state.is3D || !state.data) return;
+  if (typeof THREE === "undefined") {
+    loadThreeModule()
+      .then(() => update3DScene())
+      .catch(() => setStatus("3D view could not load because Three.js is unavailable.", "error"));
+    return;
+  }
+  const view = ensure3DScene();
+  if (!view) return;
+
+  update3DTerrain();
+  update3DPoints();
+  update3DSelection();
+  resize3DScene();
+  start3DAnimation();
+}
+
+function loadThreeModule() {
+  if (typeof THREE !== "undefined") return Promise.resolve(THREE);
+  if (!state.threePromise) {
+    state.threePromise = import(THREE_VIEW_CONFIG.threeModuleUrl).then((module) => {
+      window.THREE = module;
+      return module;
+    });
+  }
+  return state.threePromise;
+}
+
+function ensure3DScene() {
+  if (state.scene3D) return state.scene3D;
+  if (typeof THREE === "undefined") {
+    setStatus("3D view could not load because Three.js is unavailable.", "error");
+    return null;
+  }
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x26303a);
+
+  const camera = new THREE.PerspectiveCamera(50, 1, 1, 1000000);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping;
+  els.map3d.appendChild(renderer.domElement);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.85);
+  const directional = new THREE.DirectionalLight(0xffffff, 0.65);
+  directional.position.set(0, 1200, 900);
+  scene.add(ambient, directional);
+
+  const target = new THREE.Vector3(0, 0, 0);
+  const controls = {
+    target,
+    distance: 6000,
+    theta: -Math.PI / 4,
+    phi: THREE.MathUtils.degToRad(50),
+    minDistance: 250,
+    maxDistance: 180000,
+  };
+
+  state.scene3D = {
+    scene,
+    camera,
+    renderer,
+    controls,
+    terrainMesh: null,
+    pointMesh: null,
+    selectedMesh: null,
+    pixelLookup: [],
+    pixelInstances: [],
+    terrainKey: "",
+    textureKey: "",
+    texture: null,
+    raycaster: new THREE.Raycaster(),
+    pointer: new THREE.Vector2(),
+    cameraChanged: true,
+    fitKey: "",
+  };
+
+  initialize3DInteractions(state.scene3D);
+  return state.scene3D;
+}
+
+function initialize3DInteractions(view) {
+  let drag = null;
+
+  els.map3d.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    els.map3d.setPointerCapture(event.pointerId);
+    drag = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      theta: view.controls.theta,
+      phi: view.controls.phi,
+      target: view.controls.target.clone(),
+      pan: event.button === 2 || event.shiftKey || event.ctrlKey || event.metaKey,
+      moved: false,
+    };
+  });
+
+  els.map3d.addEventListener("pointermove", (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    drag.moved = drag.moved || Math.abs(dx) + Math.abs(dy) > 4;
+    if (drag.pan) {
+      pan3DCamera(view, drag, dx, dy);
+    } else {
+      view.controls.theta = drag.theta - dx * THREE_VIEW_CONFIG.orbitSensitivity;
+      view.controls.phi = clamp(
+        drag.phi + dy * THREE_VIEW_CONFIG.tiltSensitivity,
+        THREE.MathUtils.degToRad(12),
+        THREE.MathUtils.degToRad(86),
+      );
+    }
+    view.cameraChanged = true;
+  });
+
+  els.map3d.addEventListener("pointerup", (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const wasClick = !drag.moved;
+    drag = null;
+    if (wasClick) pick3DPixel(event);
+  });
+
+  els.map3d.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const scale = event.deltaY > 0 ? 1.12 : 0.88;
+    view.controls.distance = clamp(view.controls.distance * scale, view.controls.minDistance, view.controls.maxDistance);
+    view.cameraChanged = true;
+  }, { passive: false });
+
+  els.map3d.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
+}
+
+function pan3DCamera(view, drag, dx, dy) {
+  const forward = new THREE.Vector3();
+  view.camera.getWorldDirection(forward);
+  forward.y = 0;
+  if (forward.lengthSq() < 0.000001) {
+    forward.set(0, 0, -1);
+  }
+  forward.normalize();
+
+  const right = new THREE.Vector3().crossVectors(forward, view.camera.up).normalize();
+  const panScale = view.controls.distance * THREE_VIEW_CONFIG.panSensitivity;
+  view.controls.target.copy(drag.target)
+    .addScaledVector(right, -dx * panScale)
+    .addScaledVector(forward, dy * panScale);
+}
+
+function update3DTerrain() {
+  const view = state.scene3D;
+  if (!view || !state.data) return;
+
+  const bounds = getBounds();
+  const textureZoom = chooseTextureZoom(bounds);
+  const key = [
+    state.data.project.selected_file,
+    hasTerrainDem() ? state.data.layers.terrain.source : "flat",
+    state.data.lat.length,
+    state.data.lon.length,
+  ].join("|");
+
+  if (view.terrainKey !== key) {
+    if (view.terrainMesh) {
+      disposeObject3D(view.terrainMesh);
+      view.scene.remove(view.terrainMesh);
+    }
+
+    const geometry = buildTerrainGeometry();
+    const material = new THREE.MeshBasicMaterial({
+      color: hasTerrainDem() ? 0xd7d2bd : 0x8f9a9a,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    if (view.texture) {
+      material.map = view.texture;
+      material.color.set(0xffffff);
+    }
+    view.terrainMesh = new THREE.Mesh(geometry, material);
+    view.terrainMesh.name = "terrain";
+    view.scene.add(view.terrainMesh);
+    view.terrainKey = key;
+    if (view.fitKey !== state.data.project.selected_file) {
+      fit3DCameraToBounds();
+      view.fitKey = state.data.project.selected_file;
+    }
+  } else {
+    update3DTerrainHeights();
+  }
+
+  const textureKey = `${state.data.project.selected_file}|${textureZoom}`;
+  if (view.textureKey !== textureKey) {
+    view.textureKey = textureKey;
+    loadSatelliteTexture(bounds, textureZoom).then((texture) => {
+      if (!state.scene3D || state.scene3D.textureKey !== textureKey || !texture) return;
+      if (state.scene3D.texture) state.scene3D.texture.dispose();
+      state.scene3D.texture = texture;
+      state.scene3D.terrainMesh.material.map = texture;
+      state.scene3D.terrainMesh.material.color.set(0xffffff);
+      state.scene3D.terrainMesh.material.needsUpdate = true;
+    }).catch(() => {
+      if (state.scene3D?.terrainMesh) {
+        state.scene3D.terrainMesh.material.map = null;
+        state.scene3D.terrainMesh.material.needsUpdate = true;
+      }
+    });
+  }
+}
+
+function buildTerrainGeometry() {
+  const latIndices = sampledIndices(state.data.lat.length, THREE_VIEW_CONFIG.terrainMeshMaxAxis);
+  const lonIndices = sampledIndices(state.data.lon.length, THREE_VIEW_CONFIG.terrainMeshMaxAxis);
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const bounds = getBounds();
+  const textureZoom = chooseTextureZoom(bounds);
+  const westTile = lonToTileX(bounds.lon_min, textureZoom);
+  const eastTile = lonToTileX(bounds.lon_max, textureZoom);
+  const northTile = latToTileY(bounds.lat_max, textureZoom);
+  const southTile = latToTileY(bounds.lat_min, textureZoom);
+  const tileWidth = Math.max(1, eastTile - westTile + 1);
+  const tileHeight = Math.max(1, southTile - northTile + 1);
+
+  latIndices.forEach((row) => {
+    lonIndices.forEach((col) => {
+      const position = worldPosition(row, col, 0);
+      positions.push(position.x, position.y - THREE_VIEW_CONFIG.verticalOffsetMeters, position.z);
+      const lon = state.data.lon[col];
+      const lat = state.data.lat[row];
+      uvs.push(
+        (lonToTileFloat(lon, textureZoom) - westTile) / tileWidth,
+        1 - ((latToTileFloat(lat, textureZoom) - northTile) / tileHeight),
+      );
+    });
+  });
+
+  for (let y = 0; y < latIndices.length - 1; y += 1) {
+    for (let x = 0; x < lonIndices.length - 1; x += 1) {
+      const a = y * lonIndices.length + x;
+      const b = a + 1;
+      const c = a + lonIndices.length;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.userData.latIndices = latIndices;
+  geometry.userData.lonIndices = lonIndices;
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function update3DTerrainHeights() {
+  const view = state.scene3D;
+  const geometry = view?.terrainMesh?.geometry;
+  if (!geometry) return;
+  const position = geometry.getAttribute("position");
+  const latIndices = geometry.userData.latIndices || [];
+  const lonIndices = geometry.userData.lonIndices || [];
+  let vertex = 0;
+
+  latIndices.forEach((row) => {
+    lonIndices.forEach((col) => {
+      position.setY(vertex, terrainY(row, col) - THREE_VIEW_CONFIG.verticalOffsetMeters);
+      vertex += 1;
+    });
+  });
+
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+function sampledIndices(length, maxCount) {
+  if (length <= maxCount) return Array.from({ length }, (_, index) => index);
+  const indices = [];
+  for (let index = 0; index < maxCount; index += 1) {
+    indices.push(Math.round((index / (maxCount - 1)) * (length - 1)));
+  }
+  return [...new Set(indices)];
+}
+
+function update3DPoints() {
+  const view = state.scene3D;
+  if (!view) return;
+
+  if (view.pointMesh) {
+    disposeObject3D(view.pointMesh);
+    view.scene.remove(view.pointMesh);
+    view.pointMesh = null;
+  }
+  view.pixelLookup = [];
+  view.pixelInstances = [];
+
+  if (!state.activeLayer || !state.rasterValues || !state.rasterRange) return;
+  if (state.rasterRange.p02 === null && state.activeLayer !== "coherence") return;
+
+  const values = state.rasterValues;
+  const offsets = [];
+  const colors = [];
+  const radius = current3DPointRadius();
+  for (let row = 0; row < values.length; row += 1) {
+    for (let col = 0; col < values[row].length; col += 1) {
+      const value = values[row][col];
+      const hiddenByFilter = isFilterableLayer() && !pixelPassesFilter(row, col);
+      if (hiddenByFilter || value === null || Number.isNaN(value)) continue;
+      const color = colorForValue(value, state.rasterRange, state.activeLayer);
+      view.pixelLookup.push({ row, col });
+      view.pixelInstances.push({ row, col });
+      const position = worldPosition(row, col, THREE_VIEW_CONFIG.verticalOffsetMeters + radius);
+      offsets.push(position.x, position.y, position.z);
+      colors.push(color[0] / 255, color[1] / 255, color[2] / 255);
+    }
+  }
+
+  if (!view.pixelInstances.length) return;
+
+  const sphereGeometry = new THREE.SphereGeometry(1, 14, 10);
+  const geometry = new THREE.InstancedBufferGeometry().copy(sphereGeometry);
+  sphereGeometry.dispose();
+  const radii = new Float32Array(view.pixelInstances.length).fill(radius);
+  geometry.setAttribute("instanceOffset", new THREE.InstancedBufferAttribute(new Float32Array(offsets), 3));
+  geometry.setAttribute("instanceColor", new THREE.InstancedBufferAttribute(new Float32Array(colors), 3));
+  geometry.setAttribute("instanceRadius", new THREE.InstancedBufferAttribute(radii, 1));
+  geometry.instanceCount = view.pixelInstances.length;
+
+  const material = new THREE.ShaderMaterial({
+    vertexShader: `
+      attribute vec3 instanceOffset;
+      attribute vec3 instanceColor;
+      attribute float instanceRadius;
+      varying vec3 vColor;
+      varying vec3 vNormal;
+
+      void main() {
+        vColor = instanceColor;
+        vNormal = normalize(normalMatrix * normal);
+        vec3 spherePosition = position * instanceRadius + instanceOffset;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(spherePosition, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vColor;
+      varying vec3 vNormal;
+
+      void main() {
+        float shade = 0.72 + 0.28 * max(dot(normalize(vNormal), normalize(vec3(0.35, 0.65, 0.7))), 0.0);
+        gl_FragColor = vec4(vColor * shade, 1.0);
+      }
+    `,
+    depthTest: true,
+    depthWrite: true,
+    toneMapped: false,
+  });
+  view.pointMesh = new THREE.Mesh(geometry, material);
+  view.pointMesh.name = "insar-pixels";
+  view.pointMesh.frustumCulled = false;
+  view.pointMesh.renderOrder = 0;
+  view.scene.add(view.pointMesh);
+  update3DPointPositions(radius);
+}
+
+function update3DPointPositions(radius = current3DPointRadius()) {
+  const view = state.scene3D;
+  if (!view?.pointMesh) return;
+  const geometry = view.pointMesh.geometry;
+  const offsets = geometry.getAttribute("instanceOffset");
+  const radii = geometry.getAttribute("instanceRadius");
+
+  view.pixelInstances.forEach((pixel, index) => {
+    const position = worldPosition(pixel.row, pixel.col, THREE_VIEW_CONFIG.verticalOffsetMeters + radius);
+    offsets.setXYZ(index, position.x, position.y, position.z);
+    radii.setX(index, radius);
+  });
+  offsets.needsUpdate = true;
+  radii.needsUpdate = true;
+  update3DSelection();
+}
+
+function update3DPointMaterialSize() {
+  update3DPointPositions();
+}
+
+function current3DPointRadius() {
+  if (!state.data) return 8;
+  const bounds = getBounds();
+  const widthMeters = Math.abs(mercatorX(bounds.lon_max) - mercatorX(bounds.lon_min));
+  const heightMeters = Math.abs(mercatorY(bounds.lat_max) - mercatorY(bounds.lat_min));
+  const cellBase = Math.min(
+    widthMeters / Math.max(state.data.lon.length, 1),
+    heightMeters / Math.max(state.data.lat.length, 1),
+  );
+  return clamp(cellBase * 0.62, 4, Math.max(26, cellBase * 2.2));
+}
+
+function update3DSelection() {
+  const view = state.scene3D;
+  if (!view) return;
+  if (view.selectedMesh) {
+    disposeObject3D(view.selectedMesh);
+    view.scene.remove(view.selectedMesh);
+    view.selectedMesh = null;
+  }
+  if (!state.selectedPixel || !state.is3D) return;
+
+  const { row, col } = state.selectedPixel;
+  const geometry = new THREE.SphereGeometry(1, 18, 12);
+  const material = new THREE.MeshBasicMaterial({ color: 0xfcd900, wireframe: true });
+  view.selectedMesh = new THREE.Mesh(geometry, material);
+  view.selectedMesh.position.copy(worldPosition(row, col, THREE_VIEW_CONFIG.verticalOffsetMeters));
+  view.selectedMesh.scale.setScalar(current3DPointRadius() * 1.9);
+  view.scene.add(view.selectedMesh);
+}
+
+function pick3DPixel(event) {
+  const view = state.scene3D;
+  if (!view?.pointMesh) return;
+
+  const rect = els.map3d.getBoundingClientRect();
+  view.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  view.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  view.raycaster.setFromCamera(view.pointer, view.camera);
+  const hitIndex = pick3DSphereInstance(view);
+  if (hitIndex === null) return;
+
+  const pixel = view.pixelLookup[hitIndex];
+  if (!pixel) return;
+  state.selectedPixel = { row: pixel.row, col: pixel.col };
+  showPixelPanel();
+  update3DSelection();
+  updatePixelInfo();
+  drawTimeSeries();
+}
+
+function pick3DSphereInstance(view) {
+  const geometry = view.pointMesh.geometry;
+  const offsets = geometry.getAttribute("instanceOffset");
+  const radius = current3DPointRadius();
+  const threshold = radius * 1.25;
+  const thresholdSq = threshold * threshold;
+  const point = new THREE.Vector3();
+  const closest = new THREE.Vector3();
+  let bestIndex = null;
+  let bestDepth = Infinity;
+
+  for (let index = 0; index < offsets.count; index += 1) {
+    point.fromBufferAttribute(offsets, index);
+    view.raycaster.ray.closestPointToPoint(point, closest);
+    if (closest.distanceToSquared(point) > thresholdSq) continue;
+    const depth = view.raycaster.ray.origin.distanceToSquared(point);
+    if (depth < bestDepth) {
+      bestDepth = depth;
+      bestIndex = index;
+    }
+  }
+
+  return bestIndex;
+}
+
+function worldPosition(row, col, zOffset = 0) {
+  const lon = state.data.lon[col];
+  const lat = state.data.lat[row];
+  const bounds = getBounds();
+  const centerLon = (bounds.lon_min + bounds.lon_max) / 2;
+  const centerLat = (bounds.lat_min + bounds.lat_max) / 2;
+  return new THREE.Vector3(
+    mercatorX(lon) - mercatorX(centerLon),
+    terrainY(row, col) + zOffset,
+    mercatorY(centerLat) - mercatorY(lat),
+  );
+}
+
+function terrainY(row, col) {
+  return ((getElevation(row, col) - getElevationDatum()) * state.verticalExaggeration);
+}
+
+function mercatorX(lon) {
+  return 6378137 * lon * Math.PI / 180;
+}
+
+function mercatorY(lat) {
+  const clippedLat = clamp(lat, -85.05112878, 85.05112878);
+  const rad = clippedLat * Math.PI / 180;
+  return 6378137 * Math.log(Math.tan(Math.PI / 4 + rad / 2));
+}
+
+function fit3DCameraToBounds() {
+  const view = state.scene3D;
+  if (!view || !state.data) return;
+  const bounds = getBounds();
+  const widthMeters = Math.abs(mercatorX(bounds.lon_max) - mercatorX(bounds.lon_min));
+  const heightMeters = Math.abs(mercatorY(bounds.lat_max) - mercatorY(bounds.lat_min));
+  const span = Math.max(widthMeters, heightMeters, 1000);
+  view.controls.distance = span * 1.12;
+  view.controls.theta = -Math.PI / 4;
+  view.controls.phi = THREE.MathUtils.degToRad(50);
+  view.controls.minDistance = Math.max(120, span * 0.05);
+  view.controls.maxDistance = Math.max(3000, span * 5);
+  view.cameraChanged = true;
+}
+
+function apply3DCamera() {
+  const view = state.scene3D;
+  if (!view) return;
+  const { distance, theta, phi, target } = view.controls;
+  const sinPhi = Math.sin(phi);
+  view.camera.position.set(
+    target.x + distance * sinPhi * Math.sin(theta),
+    target.y + distance * Math.cos(phi),
+    target.z + distance * sinPhi * Math.cos(theta),
+  );
+  view.camera.lookAt(target);
+  view.cameraChanged = false;
+  update3DPointMaterialSize();
+}
+
+function resize3DScene() {
+  const view = state.scene3D;
+  if (!view) return;
+  const rect = els.map3d.getBoundingClientRect();
+  const width = Math.max(1, Math.floor(rect.width));
+  const height = Math.max(1, Math.floor(rect.height));
+  view.renderer.setSize(width, height, false);
+  view.camera.aspect = width / height;
+  view.camera.updateProjectionMatrix();
+  view.cameraChanged = true;
+}
+
+function start3DAnimation() {
+  if (state.is3DAnimating) return;
+  state.is3DAnimating = true;
+  const animate = () => {
+    if (!state.is3DAnimating || !state.scene3D) return;
+    if (state.scene3D.cameraChanged) apply3DCamera();
+    state.scene3D.renderer.render(state.scene3D.scene, state.scene3D.camera);
+    requestAnimationFrame(animate);
+  };
+  requestAnimationFrame(animate);
+}
+
+function stop3DAnimation() {
+  state.is3DAnimating = false;
+}
+
+function disposeObject3D(object) {
+  object.geometry?.dispose?.();
+  if (Array.isArray(object.material)) {
+    object.material.forEach((material) => material.dispose?.());
+  } else {
+    object.material?.dispose?.();
+  }
+}
+
+function create3DPointTexture() {
+  if (state.scene3D?.pointTexture) return state.scene3D.pointTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, 64, 64);
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(32, 32, 28, 0, Math.PI * 2);
+  ctx.fill();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  if (state.scene3D) state.scene3D.pointTexture = texture;
+  return texture;
+}
+
+function chooseTextureZoom(bounds) {
+  let zoom = THREE_VIEW_CONFIG.terrainTextureZoom;
+  while (zoom > 8) {
+    const span = tileSpan(bounds, zoom);
+    if (
+      span.x <= THREE_VIEW_CONFIG.maxTextureTilesPerAxis
+      && span.y <= THREE_VIEW_CONFIG.maxTextureTilesPerAxis
+    ) {
+      return zoom;
+    }
+    zoom -= 1;
+  }
+  return zoom;
+}
+
+function tileSpan(bounds, zoom) {
+  const west = lonToTileX(bounds.lon_min, zoom);
+  const east = lonToTileX(bounds.lon_max, zoom);
+  const north = latToTileY(bounds.lat_max, zoom);
+  const south = latToTileY(bounds.lat_min, zoom);
+  return {
+    x: Math.abs(east - west) + 1,
+    y: Math.abs(south - north) + 1,
+  };
+}
+
+async function loadSatelliteTexture(bounds, zoom) {
+  const westTile = lonToTileX(bounds.lon_min, zoom);
+  const eastTile = lonToTileX(bounds.lon_max, zoom);
+  const northTile = latToTileY(bounds.lat_max, zoom);
+  const southTile = latToTileY(bounds.lat_min, zoom);
+  const width = (eastTile - westTile + 1) * 256;
+  const height = (southTile - northTile + 1) * 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const tasks = [];
+  for (let x = westTile; x <= eastTile; x += 1) {
+    for (let y = northTile; y <= southTile; y += 1) {
+      const url = THREE_VIEW_CONFIG.satelliteTileUrl
+        .replace("{z}", zoom)
+        .replace("{x}", x)
+        .replace("{y}", y);
+      tasks.push(loadImage(url).then((image) => {
+        ctx.drawImage(image, (x - westTile) * 256, (y - northTile) * 256, 256, 256);
+      }).catch(() => {}));
+    }
+  }
+
+  await Promise.all(tasks);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = url;
+  });
+}
+
+function lonToTileX(lon, zoom) {
+  return Math.floor(lonToTileFloat(lon, zoom));
+}
+
+function latToTileY(lat, zoom) {
+  return Math.floor(latToTileFloat(lat, zoom));
+}
+
+function lonToTileFloat(lon, zoom) {
+  return ((lon + 180) / 360) * (2 ** zoom);
+}
+
+function latToTileFloat(lat, zoom) {
+  const latRad = lat * Math.PI / 180;
+  return (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * (2 ** zoom);
+}
+
 function syncQualityControls() {
   const thresholds = state.qualityThresholds;
   const totalPairs = totalPairCount();
@@ -819,10 +1562,12 @@ function updatePixelInfo() {
   const totalPairs = state.data.layers.n_good_pairs.n_pairs_total;
   const rmse = state.data.layers.rmse.values[row][col];
   const deformation = state.data.layers.deformation.values[state.dateIndex][row][col];
+  const elevation = getElevation(row, col);
   const passes = pixelPassesFilter(row, col);
 
   els.pixelLat.textContent = formatNumber(state.data.lat[row], 6);
   els.pixelLon.textContent = formatNumber(state.data.lon[col], 6);
+  els.pixelElevation.textContent = hasTerrainDem() ? `${formatNumber(elevation, 1)} m` : "n/a";
   els.pixelVelocity.textContent = `${formatNumber(velocity)} mm/year`;
   els.pixelCoherenceLabel.innerHTML = `${state.activeLayer === "coherence" ? "Pair coherence" : "Median coherence"} <span class="metric-hint">high = good</span>`;
   els.pixelCoherence.textContent = formatNumber(coherence, 2);
@@ -837,6 +1582,7 @@ function updatePixelInfo() {
 function resetPixelInfo() {
   els.pixelLat.textContent = "Click the map";
   els.pixelLon.textContent = "Click the map";
+  els.pixelElevation.textContent = "-";
   els.pixelVelocity.textContent = "-";
   els.pixelCoherenceLabel.innerHTML = "Median coherence <span class=\"metric-hint\">high = good</span>";
   els.pixelCoherence.textContent = "-";
@@ -1058,6 +1804,26 @@ els.datasetInfoButton.addEventListener("click", () => {
   openDatasetModal();
 });
 
+els.view3dToggle.addEventListener("click", () => {
+  state.is3D = !state.is3D;
+  localStorage.setItem("insar-view-mode", state.is3D ? "3d" : "2d");
+  syncViewMode();
+  drawMap();
+});
+
+els.verticalExaggerationSlider.addEventListener("input", () => {
+  state.verticalExaggeration = Number(els.verticalExaggerationSlider.value);
+  localStorage.setItem("insar-vertical-exaggeration", String(state.verticalExaggeration));
+  syncViewMode();
+  if (state.scene3D) {
+    update3DTerrainHeights();
+    update3DPointPositions();
+    state.scene3D.cameraChanged = true;
+  } else {
+    drawMap();
+  }
+});
+
 els.datasetModalClose.addEventListener("click", closeDatasetModal);
 els.datasetModal.addEventListener("click", (event) => {
   if (event.target === els.datasetModal) {
@@ -1174,6 +1940,7 @@ function clearSelectedPixel() {
     state.selectedPixelLayer.remove();
     state.selectedPixelLayer = null;
   }
+  update3DSelection();
 }
 
 function placePanelBottomRight() {
