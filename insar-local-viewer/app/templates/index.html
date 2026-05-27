@@ -104,16 +104,6 @@
               </div>
             </section>
 
-            <section class="sidebar-section">
-              <h2>Legend</h2>
-              <div id="legend-title" class="legend-title">Velocity</div>
-              <div id="legend-bar" class="legend-bar"></div>
-              <div class="legend-scale">
-                <span id="legend-min">-</span>
-                <span id="legend-mid">0</span>
-                <span id="legend-max">-</span>
-              </div>
-            </section>
           </div>
         </aside>
 
@@ -122,6 +112,26 @@
             <div id="map"></div>
             <div id="map-3d" class="map-3d" aria-label="3D terrain map" hidden></div>
             <div id="map-placeholder" class="map-placeholder">Load a processed project folder to display the map.</div>
+            <aside id="map-legend" class="map-legend" aria-label="Map legend">
+              <div class="map-legend-header">
+                <span class="map-legend-eyebrow">Legend</span>
+                <strong id="legend-title">No dataset selected</strong>
+                <span id="legend-unit" class="map-legend-unit">-</span>
+              </div>
+              <div class="map-legend-body">
+                <div class="map-legend-scale">
+                  <span id="legend-max">-</span>
+                  <span id="legend-mid">-</span>
+                  <span id="legend-min">-</span>
+                </div>
+                <div class="map-legend-track-wrap">
+                  <div id="legend-bar" class="map-legend-track"></div>
+                  <div id="legend-indicator" class="map-legend-indicator" hidden>
+                    <span aria-hidden="true"></span>
+                  </div>
+                </div>
+              </div>
+            </aside>
             <div class="map-toolbar" aria-label="Map view controls">
               <button id="view-3d-toggle" class="map-toggle-button" type="button" aria-pressed="false" title="Toggle 3D view. Drag to orbit, Shift-drag or right-drag to pan, scroll to zoom.">
                 <img class="view-icon" src="{{ url_for('assets', filename='icons/cube.svg') }}" alt="" aria-hidden="true">

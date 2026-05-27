@@ -62,11 +62,14 @@ const els = {
   goodPairsMinValue: document.querySelector("#good-pairs-min-value"),
   visiblePixelStatus: document.querySelector("#visible-pixel-status"),
   lastUpdatedStatus: document.querySelector("#last-updated-status"),
+  mapLegend: document.querySelector("#map-legend"),
   legendTitle: document.querySelector("#legend-title"),
+  legendUnit: document.querySelector("#legend-unit"),
   legendBar: document.querySelector("#legend-bar"),
   legendMin: document.querySelector("#legend-min"),
   legendMid: document.querySelector("#legend-mid"),
   legendMax: document.querySelector("#legend-max"),
+  legendIndicator: document.querySelector("#legend-indicator"),
   mapFrame: document.querySelector("#map-frame"),
   map: document.querySelector("#map"),
   map3d: document.querySelector("#map-3d"),
@@ -1546,10 +1549,12 @@ function formatDateTime(value) {
 function updateLegend() {
   if (!state.data || !state.activeLayer) {
     els.legendTitle.textContent = "No dataset selected";
+    els.legendUnit.textContent = "-";
     els.legendBar.style.background = "transparent";
     els.legendMin.textContent = "-";
     els.legendMid.textContent = "-";
     els.legendMax.textContent = "-";
+    els.legendIndicator.hidden = true;
     return;
   }
 
@@ -1557,18 +1562,70 @@ function updateLegend() {
   els.legendTitle.textContent = layerText[state.activeLayer].title;
 
   if (state.activeLayer === "coherence") {
-    els.legendBar.style.background = "linear-gradient(90deg, rgb(31,41,55), rgb(32,139,117), rgb(250,204,21))";
+    els.legendUnit.textContent = "unitless";
+    els.legendBar.style.background = "linear-gradient(0deg, rgb(31,41,55), rgb(32,139,117), rgb(250,204,21))";
     els.legendMin.textContent = "0";
     els.legendMid.textContent = "Reliability";
     els.legendMax.textContent = "1";
+    updateLegendIndicator();
     return;
   }
 
   const unit = state.activeLayer === "velocity" ? "mm/year" : "mm";
-  els.legendBar.style.background = "linear-gradient(90deg, rgb(40,89,173), rgb(246,247,240), rgb(190,54,45))";
-  els.legendMin.textContent = range.p02 === null ? `No visible pixels` : `${formatNumber(range.p02)} ${unit}`;
+  const legendRange = getLegendRange(range);
+  els.legendUnit.textContent = unit;
+  els.legendBar.style.background = "linear-gradient(0deg, rgb(40,89,173), rgb(246,247,240), rgb(190,54,45))";
+  els.legendMin.textContent = legendRange.min === null ? `No visible pixels` : `${formatNumber(legendRange.min)} ${unit}`;
   els.legendMid.textContent = "0";
-  els.legendMax.textContent = range.p98 === null ? "" : `${formatNumber(range.p98)} ${unit}`;
+  els.legendMax.textContent = legendRange.max === null ? "" : `${formatNumber(legendRange.max)} ${unit}`;
+  updateLegendIndicator();
+}
+
+function getLegendRange(range = getDisplayRange(state.activeLayer)) {
+  if (!range || range.min === null || range.max === null) {
+    return { min: null, max: null };
+  }
+  if (state.activeLayer === "velocity" || state.activeLayer === "deformation") {
+    const extent = Math.max(Math.abs(range.min), Math.abs(range.max), 0.000001);
+    return { min: -extent, max: extent };
+  }
+  return { min: range.min, max: range.max };
+}
+
+function updateLegendIndicator() {
+  if (!state.data || !state.activeLayer || !state.selectedPixel) {
+    els.legendIndicator.hidden = true;
+    return;
+  }
+
+  const { row, col } = state.selectedPixel;
+  const value = getLayerValues()?.[row]?.[col];
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    els.legendIndicator.hidden = true;
+    return;
+  }
+
+  const percent = legendPercentForValue(value);
+  if (percent === null) {
+    els.legendIndicator.hidden = true;
+    return;
+  }
+
+  els.legendIndicator.style.top = `${100 - percent}%`;
+  els.legendIndicator.hidden = false;
+}
+
+function legendPercentForValue(value) {
+  if (state.activeLayer === "coherence") {
+    return clamp(value, 0, 1) * 100;
+  }
+
+  const range = getLegendRange();
+  if (range.min === null || range.max === null) return null;
+  const min = range.min;
+  const max = range.max;
+  if (max <= min) return null;
+  return clamp(((value - min) / (max - min)) * 100, 0, 100);
 }
 
 function updatePixelInfo() {
@@ -1601,6 +1658,7 @@ function updatePixelInfo() {
   els.pixelDeformation.textContent = `${formatNumber(deformation)} mm`;
   els.pixelPasses.textContent = isFilterableLayer() ? (passes ? "Yes" : "No") : "Not applied";
   els.pixelPanelSubtitle.textContent = `${formatNumber(state.data.lat[row], 5)}, ${formatNumber(state.data.lon[col], 5)}`;
+  updateLegendIndicator();
 }
 
 function resetPixelInfo() {
@@ -1616,6 +1674,7 @@ function resetPixelInfo() {
   els.pixelDeformation.textContent = "-";
   els.pixelPasses.textContent = "-";
   els.pixelPanelSubtitle.textContent = "No point selected";
+  updateLegendIndicator();
 }
 
 function drawTimeSeries() {
