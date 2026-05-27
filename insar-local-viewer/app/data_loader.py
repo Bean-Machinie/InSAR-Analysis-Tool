@@ -110,6 +110,7 @@ def get_map_data(project_dir: Path) -> dict:
                 "lon_count": int(lon.size),
                 "date_count": int(len(dates)),
                 "bounds": _bounds(lat, lon),
+                "last_updated": _project_last_updated(project_dir),
             },
             "dates": dates,
             "lat": _axis_to_json(lat),
@@ -276,6 +277,13 @@ def _read_project_metadata(project_dir: Path):
         except Exception:
             metadata[filename] = {"warning": "Metadata file could not be read"}
     return metadata
+
+
+def _project_last_updated(project_dir: Path):
+    metadata = _read_project_metadata(project_dir)
+    parameters = metadata.get("parameters.json", {})
+    manifest = metadata.get("manifest.json", {})
+    return parameters.get("processing_date") or manifest.get("created")
 
 
 def _axis_to_json(values):

@@ -2,13 +2,13 @@ const state = {
   data: null,
   activeLayer: "velocity",
   dateIndex: 0,
-  qualityValue: 0.5,
-  qualityIsCustom: false,
   qualityThresholds: {
     coherence: 0.3,
-    stability: 0.18,
-    goodPairs: 6,
+    stability: 0.2,
+    goodPairs: 0,
   },
+  filterInitialized: false,
+  sidebarCollapsed: localStorage.getItem("insar-sidebar-collapsed") === "true",
   selectedPixel: null,
   map: null,
   rasterLayer: null,
@@ -19,8 +19,9 @@ const state = {
 };
 
 const els = {
-  fileMenuButton: document.querySelector("#file-menu-button"),
-  fileMenu: document.querySelector("#file-menu"),
+  sidebarToggle: document.querySelector("#sidebar-toggle"),
+  sidebar: document.querySelector("#sidebar"),
+  appTitle: document.querySelector("#app-title"),
   openProjectButton: document.querySelector("#open-project-button"),
   reloadProjectButton: document.querySelector("#reload-project-button"),
   datasetInfoButton: document.querySelector("#dataset-info-button"),
@@ -36,27 +37,22 @@ const els = {
   dateSlider: document.querySelector("#date-slider"),
   dateValue: document.querySelector("#date-value"),
   filterPanel: document.querySelector("#filter-panel"),
-  qualitySlider: document.querySelector("#quality-slider"),
-  qualityValue: document.querySelector("#quality-value"),
-  qualityNote: document.querySelector("#quality-note"),
   coherenceThresholdSlider: document.querySelector("#coherence-threshold-slider"),
   coherenceThresholdValue: document.querySelector("#coherence-threshold-value"),
   stabilityMaxSlider: document.querySelector("#stability-max-slider"),
   stabilityMaxValue: document.querySelector("#stability-max-value"),
   goodPairsMinSlider: document.querySelector("#good-pairs-min-slider"),
   goodPairsMinValue: document.querySelector("#good-pairs-min-value"),
-  filterBadge: document.querySelector("#active-filter-badge"),
+  visiblePixelStatus: document.querySelector("#visible-pixel-status"),
+  lastUpdatedStatus: document.querySelector("#last-updated-status"),
   legendTitle: document.querySelector("#legend-title"),
   legendBar: document.querySelector("#legend-bar"),
   legendMin: document.querySelector("#legend-min"),
   legendMid: document.querySelector("#legend-mid"),
   legendMax: document.querySelector("#legend-max"),
-  activeLayerTitle: document.querySelector("#active-layer-title"),
   mapFrame: document.querySelector("#map-frame"),
   map: document.querySelector("#map"),
   mapPlaceholder: document.querySelector("#map-placeholder"),
-  lonRange: document.querySelector("#lon-range"),
-  latRange: document.querySelector("#lat-range"),
   pixelLat: document.querySelector("#pixel-lat"),
   pixelLon: document.querySelector("#pixel-lon"),
   pixelVelocity: document.querySelector("#pixel-velocity"),
@@ -78,19 +74,6 @@ const layerText = {
   velocity: { title: "Velocity" },
   deformation: { title: "Deformation" },
   coherence: { title: "Coherence" },
-};
-
-const QUALITY_PRESETS = {
-  lenient: {
-    coherence: 0.2,
-    stability: 0.2,
-    goodPairRatio: 1 / 3,
-  },
-  strict: {
-    coherence: 0.4,
-    stability: 0.15,
-    goodPairRatio: 2 / 3,
-  },
 };
 
 async function fetchJson(url, options = {}) {
@@ -188,34 +171,16 @@ function totalPairCount() {
   return state.data?.layers.n_good_pairs.n_pairs_total ?? 0;
 }
 
-function goodPairMinimumForQuality(quality) {
+function defaultGoodPairMinimum() {
   const total = totalPairCount();
   if (!total) return 0;
-  const lenient = Math.max(1, Math.round(total * QUALITY_PRESETS.lenient.goodPairRatio));
-  const strict = Math.max(3, Math.round(total * QUALITY_PRESETS.strict.goodPairRatio));
-  return Math.round(lerp(lenient, strict, quality));
+  return Math.round(total * 0.5);
 }
 
-function thresholdsForQuality(quality) {
-  const t = clamp(quality, 0, 1);
-  return {
-    coherence: roundToStep(lerp(QUALITY_PRESETS.lenient.coherence, QUALITY_PRESETS.strict.coherence, t), 0.01),
-    stability: roundToStep(lerp(QUALITY_PRESETS.lenient.stability, QUALITY_PRESETS.strict.stability, t), 0.01),
-    goodPairs: goodPairMinimumForQuality(t),
-  };
-}
-
-function applyQualityThresholds(quality) {
-  state.qualityValue = clamp(quality, 0, 1);
-  state.qualityThresholds = thresholdsForQuality(state.qualityValue);
-}
-
-function lerp(start, end, t) {
-  return start + (end - start) * t;
-}
-
-function roundToStep(value, step) {
-  return Math.round(value / step) * step;
+function initializeFilterThresholds() {
+  if (state.filterInitialized) return;
+  state.qualityThresholds.goodPairs = defaultGoodPairMinimum();
+  state.filterInitialized = true;
 }
 
 function pixelPassesFilter(row, col) {
@@ -229,7 +194,7 @@ function pixelPassesFilter(row, col) {
     && stability !== null
     && goodPairs !== null
     && coherence >= thresholds.coherence
-    && stability < thresholds.stability
+    && stability <= thresholds.stability
     && goodPairs >= thresholds.goodPairs;
 }
 
@@ -376,7 +341,6 @@ function drawMap() {
   }
 
   drawSelectedPixel();
-  updateMapLabels();
   updateLegend();
   updatePixelInfo();
 }
@@ -588,19 +552,11 @@ function nearestIndex(values, target) {
   return bestIndex;
 }
 
-function updateMapLabels() {
-  const bounds = getBounds();
-  els.lonRange.textContent = `Longitude: ${formatNumber(bounds.lon_min, 5)} to ${formatNumber(bounds.lon_max, 5)}`;
-  els.latRange.textContent = `Latitude: ${formatNumber(bounds.lat_min, 5)} to ${formatNumber(bounds.lat_max, 5)}`;
-}
-
 function syncQualityControls() {
   const thresholds = state.qualityThresholds;
   const totalPairs = totalPairCount();
   const goodPairSliderMax = totalPairs || Math.max(12, thresholds.goodPairs);
 
-  els.qualitySlider.value = state.qualityValue.toFixed(2);
-  els.qualityValue.textContent = state.qualityIsCustom ? "Custom" : state.qualityValue.toFixed(2);
   els.coherenceThresholdSlider.value = thresholds.coherence.toFixed(2);
   els.coherenceThresholdValue.textContent = thresholds.coherence.toFixed(2);
   els.stabilityMaxSlider.value = thresholds.stability.toFixed(2);
@@ -610,9 +566,6 @@ function syncQualityControls() {
   els.goodPairsMinValue.textContent = totalPairs
     ? `${thresholds.goodPairs} / ${totalPairs}`
     : String(thresholds.goodPairs);
-  els.qualityNote.textContent = state.qualityIsCustom
-    ? "Custom thresholds are active. Move Quality to link them again."
-    : "Higher quality keeps only pixels with stronger, more consistent observations.";
 }
 
 function updateControls() {
@@ -622,22 +575,44 @@ function updateControls() {
 
   els.datePanel.hidden = state.activeLayer !== "deformation";
   els.filterPanel.hidden = !isFilterableLayer();
-  els.filterBadge.hidden = !isFilterableLayer();
   syncQualityControls();
-  const visibleSummary = isFilterableLayer() ? visiblePixelSummary() : null;
-  const visibleText = visibleSummary
-    ? ` - ${visibleSummary.visible.toLocaleString()} px visible (${visibleSummary.percent}% of AOI)`
-    : "";
-  const qualityLabel = state.qualityIsCustom ? "Custom quality" : `Quality: ${state.qualityValue.toFixed(2)}`;
-  els.filterBadge.textContent = `${qualityLabel}${visibleText}`;
+  updateStatusFooter();
+  updateAppTitle();
 
   if (state.data) {
     els.dateSlider.max = Math.max(0, state.data.dates.length - 1);
     els.dateSlider.value = state.dateIndex;
     els.dateValue.textContent = state.data.dates[state.dateIndex] || "-";
   }
+}
 
-  els.activeLayerTitle.textContent = layerText[state.activeLayer].title;
+function updateStatusFooter() {
+  if (!state.data) {
+    els.visiblePixelStatus.textContent = "No pixels visible";
+    els.lastUpdatedStatus.textContent = "Last updated: n/a";
+    return;
+  }
+
+  const summary = visiblePixelSummary();
+  els.visiblePixelStatus.textContent = `${summary.visible.toLocaleString()} pixels visible (${summary.percent}% of dataset)`;
+  els.lastUpdatedStatus.textContent = `Last updated: ${formatDateTime(state.data.project.last_updated)}`;
+}
+
+function updateAppTitle() {
+  const projectName = state.data ? projectFolderName(state.data.project.project_path) : "No project loaded";
+  els.appTitle.textContent = `InSAR SBAS Viewer · ${projectName}`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "n/a";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
 function updateLegend() {
@@ -807,9 +782,7 @@ async function loadProject(projectPath = "") {
       });
     }
     state.data = await fetchJson("/api/map-data");
-    if (!state.qualityIsCustom) {
-      applyQualityThresholds(state.qualityValue);
-    }
+    initializeFilterThresholds();
     state.dateIndex = 0;
     state.selectedPixel = null;
     minimizePixelPanel({ keepPanelVisible: false });
@@ -825,11 +798,6 @@ async function loadProject(projectPath = "") {
     drawTimeSeries();
     setStatus(error.message, "error");
   }
-}
-
-function setMenuOpen(open) {
-  els.fileMenu.hidden = !open;
-  els.fileMenuButton.setAttribute("aria-expanded", String(open));
 }
 
 function openDatasetModal() {
@@ -842,11 +810,24 @@ function openDatasetModal() {
 function closeDatasetModal() {
   els.datasetModal.hidden = true;
   els.datasetModal.setAttribute("aria-hidden", "true");
-  els.fileMenuButton.focus();
+  els.datasetInfoButton.focus();
+}
+
+function applySidebarState() {
+  document.body.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+  els.sidebarToggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
+  setTimeout(() => {
+    if (state.map) state.map.invalidateSize();
+  }, 220);
+}
+
+function toggleSidebar() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  localStorage.setItem("insar-sidebar-collapsed", String(state.sidebarCollapsed));
+  applySidebarState();
 }
 
 async function openProjectFromFolderPicker() {
-  setMenuOpen(false);
   setStatus("Opening folder picker...");
   try {
     const result = await fetchJson("/api/browse-folder", { method: "POST" });
@@ -856,9 +837,7 @@ async function openProjectFromFolderPicker() {
     }
 
     state.data = await fetchJson("/api/map-data");
-    if (!state.qualityIsCustom) {
-      applyQualityThresholds(state.qualityValue);
-    }
+    initializeFilterThresholds();
     state.dateIndex = 0;
     state.selectedPixel = null;
     minimizePixelPanel({ keepPanelVisible: false });
@@ -876,23 +855,11 @@ async function openProjectFromFolderPicker() {
   }
 }
 
-els.fileMenuButton.addEventListener("click", () => {
-  setMenuOpen(els.fileMenu.hidden);
-});
-
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".menu-root")) {
-    setMenuOpen(false);
-  }
-});
-
 els.openProjectButton.addEventListener("click", openProjectFromFolderPicker);
 els.reloadProjectButton.addEventListener("click", () => {
-  setMenuOpen(false);
   loadProject("__CURRENT__");
 });
 els.datasetInfoButton.addEventListener("click", () => {
-  setMenuOpen(false);
   openDatasetModal();
 });
 
@@ -925,29 +892,21 @@ els.dateSlider.addEventListener("input", () => {
   drawTimeSeries();
 });
 
-els.qualitySlider.addEventListener("input", () => {
-  state.qualityIsCustom = false;
-  applyQualityThresholds(Number(els.qualitySlider.value));
-  updateControls();
-  drawMap();
-});
+els.sidebarToggle.addEventListener("click", toggleSidebar);
 
 els.coherenceThresholdSlider.addEventListener("input", () => {
-  state.qualityIsCustom = true;
   state.qualityThresholds.coherence = Number(els.coherenceThresholdSlider.value);
   updateControls();
   drawMap();
 });
 
 els.stabilityMaxSlider.addEventListener("input", () => {
-  state.qualityIsCustom = true;
   state.qualityThresholds.stability = Number(els.stabilityMaxSlider.value);
   updateControls();
   drawMap();
 });
 
 els.goodPairsMinSlider.addEventListener("input", () => {
-  state.qualityIsCustom = true;
   state.qualityThresholds.goodPairs = Number(els.goodPairsMinSlider.value);
   updateControls();
   drawMap();
@@ -998,7 +957,7 @@ function placePanelBottomRight() {
   const height = Math.min(420, Math.max(300, frame.height * 0.44));
   setPanelGeometry({
     left: frame.width - width - 18,
-    top: frame.height - height - 18,
+    top: 18,
     width,
     height,
   });
@@ -1127,7 +1086,7 @@ function initializeFloatingPanel() {
   });
 
   els.pixelPanelMinimize.addEventListener("click", () => {
-    minimizePixelPanel({ keepPanelVisible: true });
+    minimizePixelPanel({ keepPanelVisible: false });
   });
 }
 
@@ -1145,6 +1104,7 @@ function resetMapLayers() {
   }
 }
 
+applySidebarState();
 updateControls();
 initializeFloatingPanel();
 drawMap();
