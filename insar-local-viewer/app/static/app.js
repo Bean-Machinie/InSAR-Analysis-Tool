@@ -119,8 +119,20 @@ function getLayerValues(layer = state.activeLayer) {
   if (!state.data || !layer) return null;
   if (layer === "velocity") return state.data.layers.velocity.values;
   if (layer === "coherence") return getCoherenceValues();
-  if (layer === "deformation") return state.data.layers.deformation.values[state.dateIndex];
+  if (layer === "deformation") return getDeformationValues();
   return null;
+}
+
+function getDeformationValues(index = state.dateIndex) {
+  const stack = state.data?.layers.deformation.values;
+  if (!stack?.length) return null;
+  return stack[clamp(index, 0, stack.length - 1)];
+}
+
+function getFinalDeformationValues() {
+  const stack = state.data?.layers.deformation.values;
+  if (!stack?.length) return null;
+  return stack[stack.length - 1];
 }
 
 function getCoherenceValues() {
@@ -155,11 +167,16 @@ function getDisplayRange(layer = state.activeLayer, values = getLayerValues(laye
     return state.data.layers.coherence.range;
   }
 
+  const rangeValues = layer === "deformation"
+    ? getFinalDeformationValues()
+    : values;
+  if (!rangeValues) return getLayerRange(layer);
+
   const visibleValues = [];
 
-  for (let y = 0; y < values.length; y += 1) {
-    for (let x = 0; x < values[y].length; x += 1) {
-      const value = values[y][x];
+  for (let y = 0; y < rangeValues.length; y += 1) {
+    for (let x = 0; x < rangeValues[y].length; x += 1) {
+      const value = rangeValues[y][x];
       if (
         value !== null
         && !Number.isNaN(value)
