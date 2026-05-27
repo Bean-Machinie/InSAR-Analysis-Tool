@@ -134,6 +134,10 @@ function getCoherencePairs() {
   return state.data?.layers.coherence.pairs ?? [];
 }
 
+function getCoherenceStackKind() {
+  return state.data?.layers.coherence.stack_kind ?? "summary";
+}
+
 function getCoherenceBaselines() {
   return state.data?.layers.coherence.pair_baselines_days ?? [];
 }
@@ -652,10 +656,25 @@ function coherencePairDatesLabel(index) {
   const pairs = getCoherencePairs();
   if (!pairs.length) return "-";
   const label = pairs[index] || pairs[0];
-  return label.replace(/\s+/, " to ");
+  if (getCoherenceStackKind() === "pair") {
+    return label.replace(/\s+/, " to ");
+  }
+  if (getCoherenceStackKind() === "date") {
+    return `Attributed date: ${label}`;
+  }
+  return label;
 }
 
 function updateCoherenceBaselineSummary(index) {
+  if (getCoherenceStackKind() !== "pair") {
+    els.coherenceBaselineValue.textContent = "n/a";
+    els.coherenceBaselineRange.textContent = getCoherenceStackKind() === "date"
+      ? "Temporal baseline unavailable for date-attributed coherence"
+      : "Temporal baseline unavailable";
+    els.coherenceBaselineFill.style.width = "0%";
+    return;
+  }
+
   const baselines = getCoherenceBaselines().filter((value) => value !== null && value !== undefined);
   const baseline = getCoherenceBaselines()[index];
 

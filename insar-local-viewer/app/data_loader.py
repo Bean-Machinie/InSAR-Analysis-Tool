@@ -16,6 +16,7 @@ DISPLACEMENT_CANDIDATES = ["sbas_displacement_raw", "sbas_displacement_masked"]
 COHERENCE_CANDIDATES = ["coherence_median", "coherence_mean"]
 RMSE_CANDIDATES = ["sbas_rmse_raw", "sbas_rmse_masked"]
 COHERENCE_STACK_NAME = "coherence_stack"
+COHERENCE_DATE_STACK_CANDIDATES = ["coherence_per_date", "pairwise_coherence_attributed_to_date"]
 
 
 class ProjectDataError(Exception):
@@ -29,16 +30,51 @@ def select_netcdf_file(project_dir: Path) -> Path:
     if not project_dir.is_dir():
         raise ProjectDataError(f"Project path is not a folder: {project_dir}")
 
-    for filename in NETCDF_PRIORITY:
-        candidate = project_dir / filename
-        if candidate.exists():
-            return candidate
+    for candidate_dir in _candidate_project_dirs(project_dir):
+        for filename in NETCDF_PRIORITY:
+            candidate = candidate_dir / filename
+            if candidate.exists():
+                return candidate
 
-    netcdf_files = sorted(project_dir.glob("*.nc"))
-    if netcdf_files:
-        return netcdf_files[0]
+        netcdf_files = sorted(candidate_dir.glob("*.nc"))
+        if netcdf_files:
+            return netcdf_files[0]
+
+    nested_files = sorted(project_dir.glob("**/*.nc"))
+    if nested_files:
+        for filename in NETCDF_PRIORITY:
+            for candidate in nested_files:
+                if candidate.name == filename:
+                    return candidate
+        return nested_files[0]
 
     raise ProjectDataError(f"No NetCDF files found in project folder: {project_dir}")
+
+
+def _candidate_project_dirs(project_dir: Path) -> list[Path]:
+    candidates = [
+        project_dir,
+        project_dir / "outputs" / "project_D",
+    ]
+
+    outputs_dir = project_dir / "outputs"
+    if outputs_dir.exists():
+        candidates.extend(path for path in sorted(outputs_dir.iterdir()) if path.is_dir())
+
+    candidates.extend(project_dir.parents[:3])
+
+    unique_candidates = []
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen or not resolved.exists() or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+        unique_candidates.append(resolved)
+    return unique_candidates
 
 
 def open_dataset(project_dir: Path):
@@ -52,14 +88,15 @@ def open_dataset(project_dir: Path):
 def get_project_info(project_dir: Path) -> dict:
     selected_file, dataset = open_dataset(project_dir)
     try:
+        resolved_project_dir = selected_file.parent
         lat = _coord_values(dataset, "lat")
         lon = _coord_values(dataset, "lon")
         dates = _date_strings(dataset)
         products = _resolve_products(dataset)
-        metadata = _read_project_metadata(project_dir)
+        metadata = _read_project_metadata(resolved_project_dir)
 
         return {
-            "project_path": str(project_dir),
+            "project_path": str(resolved_project_dir),
             "selected_file": str(selected_file),
             "dataset_file": selected_file.name,
             "products": {
@@ -81,6 +118,7 @@ def get_project_info(project_dir: Path) -> dict:
 def get_map_data(project_dir: Path) -> dict:
     selected_file, dataset = open_dataset(project_dir)
     try:
+        resolved_project_dir = selected_file.parent
         lat = _coord_values(dataset, "lat")
         lon = _coord_values(dataset, "lon")
         dates = _date_strings(dataset)
@@ -90,28 +128,31 @@ def get_map_data(project_dir: Path) -> dict:
         _require_product(products, "deformation")
         _require_product(products, "coherence")
         _require_product(products, "rmse")
-        _require_product(products, "coherence_stack")
 
         velocity = _read_2d(dataset, products["velocity"])
         coherence = _read_2d(dataset, products["coherence"])
         displacement = _read_3d(dataset, products["deformation"])
         rmse = _read_2d(dataset, products["rmse"])
-        coherence_stack = _read_coherence_stack(dataset, products["coherence_stack"])
-        coherence_pairs = _pair_strings(dataset)
+        coherence_stack, coherence_labels, coherence_baselines, coherence_stack_kind = _read_coherence_display_stack(
+            dataset,
+            products,
+            coherence,
+            dates,
+        )
         n_pairs_total = int(coherence_stack.shape[0])
         coherence_stability = coherence_stack.std(axis=0).astype("float32")
         n_good_pairs = (coherence_stack >= 0.3).sum(axis=0).astype("int16")
 
         return {
             "project": {
-                "project_path": str(project_dir),
+                "project_path": str(resolved_project_dir),
                 "selected_file": str(selected_file),
                 "dataset_file": selected_file.name,
                 "lat_count": int(lat.size),
                 "lon_count": int(lon.size),
                 "date_count": int(len(dates)),
                 "bounds": _bounds(lat, lon),
-                "last_updated": _project_last_updated(project_dir),
+                "last_updated": _project_last_updated(resolved_project_dir),
             },
             "dates": dates,
             "lat": _axis_to_json(lat),
@@ -127,14 +168,15 @@ def get_map_data(project_dir: Path) -> dict:
                     "range": _robust_range(displacement, center_zero=True),
                     "unit": "mm",
                 },
-        "coherence": {
-            "values": _array_to_json(coherence),
-            "stack": _array_to_json(coherence_stack),
-            "pairs": coherence_pairs,
-            "pair_baselines_days": [_pair_baseline_days(pair) for pair in coherence_pairs],
-            "range": {"min": 0.0, "max": 1.0, "p02": 0.0, "p98": 1.0},
-            "unit": "unitless",
-        },
+                "coherence": {
+                    "values": _array_to_json(coherence),
+                    "stack": _array_to_json(coherence_stack),
+                    "pairs": coherence_labels,
+                    "pair_baselines_days": coherence_baselines,
+                    "stack_kind": coherence_stack_kind,
+                    "range": {"min": 0.0, "max": 1.0, "p02": 0.0, "p98": 1.0},
+                    "unit": "unitless",
+                },
                 "rmse": {
                     "values": _array_to_json(rmse),
                     "unit": "mm",
@@ -243,6 +285,7 @@ def _resolve_products(dataset):
         "coherence": _first_existing_var(dataset, COHERENCE_CANDIDATES),
         "rmse": _first_existing_var(dataset, RMSE_CANDIDATES),
         "coherence_stack": COHERENCE_STACK_NAME if COHERENCE_STACK_NAME in dataset.data_vars else None,
+        "coherence_date_stack": _first_existing_var(dataset, COHERENCE_DATE_STACK_CANDIDATES),
     }
 
 
@@ -277,6 +320,35 @@ def _read_coherence_stack(dataset, variable_name):
     if variable.ndim != 3 or set(variable.dims) != {"pair", "lat", "lon"}:
         raise ProjectDataError(f"Expected {variable_name} to be a 3D pair/lat/lon layer")
     return np.asarray(variable.transpose("pair", "lat", "lon").values, dtype=float)
+
+
+def _read_coherence_display_stack(dataset, products, coherence_2d, dates):
+    if products["coherence_stack"]:
+        coherence_stack = _read_coherence_stack(dataset, products["coherence_stack"])
+        coherence_pairs = _pair_strings(dataset)
+        return (
+            coherence_stack,
+            coherence_pairs,
+            [_pair_baseline_days(pair) for pair in coherence_pairs],
+            "pair",
+        )
+
+    if products["coherence_date_stack"]:
+        coherence_stack = _read_3d(dataset, products["coherence_date_stack"])
+        labels = dates or [f"Slice {index + 1}" for index in range(coherence_stack.shape[0])]
+        return (
+            coherence_stack,
+            labels,
+            [None for _ in labels],
+            "date",
+        )
+
+    return (
+        np.asarray(coherence_2d, dtype=float)[np.newaxis, :, :],
+        ["Median coherence"],
+        [None],
+        "summary",
+    )
 
 
 def _bounds(lat, lon):
