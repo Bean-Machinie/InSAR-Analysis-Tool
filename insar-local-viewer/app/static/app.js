@@ -19,6 +19,7 @@ const state = {
   hasFitProjectBounds: false,
   is3D: localStorage.getItem("insar-view-mode") === "3d",
   verticalExaggeration: Number(localStorage.getItem("insar-vertical-exaggeration")) || 1.5,
+  heatmapPalette: localStorage.getItem("insar-heatmap-palette") || "spectral",
   scene3D: null,
   is3DAnimating: false,
   threePromise: null,
@@ -29,8 +30,14 @@ const els = {
   appTitle: document.querySelector("#app-title"),
   openProjectButton: document.querySelector("#open-project-button"),
   datasetInfoButton: document.querySelector("#dataset-info-button"),
+  settingsButton: document.querySelector("#settings-button"),
   datasetModal: document.querySelector("#dataset-modal"),
   datasetModalClose: document.querySelector("#dataset-modal-close"),
+  settingsModal: document.querySelector("#settings-modal"),
+  settingsModalClose: document.querySelector("#settings-modal-close"),
+  settingsNavButtons: document.querySelectorAll(".settings-nav-button"),
+  settingsContents: document.querySelectorAll(".settings-content"),
+  heatmapOptions: document.querySelector("#heatmap-options"),
   datasetProjectLabel: document.querySelector("#dataset-project-label"),
   status: document.querySelector("#status"),
   datasetFile: document.querySelector("#dataset-file"),
@@ -64,12 +71,8 @@ const els = {
   lastUpdatedStatus: document.querySelector("#last-updated-status"),
   mapLegend: document.querySelector("#map-legend"),
   legendTitle: document.querySelector("#legend-title"),
-  legendUnit: document.querySelector("#legend-unit"),
-  legendBar: document.querySelector("#legend-bar"),
-  legendMin: document.querySelector("#legend-min"),
-  legendMid: document.querySelector("#legend-mid"),
-  legendMax: document.querySelector("#legend-max"),
-  legendIndicator: document.querySelector("#legend-indicator"),
+  legendSubtitle: document.querySelector("#legend-subtitle"),
+  legendItems: document.querySelector("#legend-items"),
   mapFrame: document.querySelector("#map-frame"),
   map: document.querySelector("#map"),
   map3d: document.querySelector("#map-3d"),
@@ -102,6 +105,90 @@ const layerText = {
   deformation: { title: "Deformation" },
   coherence: { title: "Coherence" },
 };
+
+const HEATMAP_PALETTES = {
+  spectral: {
+    name: "Spectral",
+    detail: "red, amber, green, cyan, blue",
+    colors: [
+      [155, 0, 36],
+      [214, 39, 40],
+      [247, 127, 43],
+      [255, 226, 89],
+      [92, 201, 83],
+      [26, 174, 198],
+      [37, 96, 173],
+    ],
+  },
+  highContrast: {
+    name: "High contrast",
+    detail: "crimson, orange, ivory, teal, navy",
+    colors: [
+      [103, 0, 31],
+      [178, 24, 43],
+      [239, 138, 98],
+      [247, 247, 247],
+      [102, 194, 165],
+      [33, 102, 172],
+      [5, 48, 97],
+    ],
+  },
+  terrain: {
+    name: "Terrain",
+    detail: "burgundy, copper, gold, leaf, deep water",
+    colors: [
+      [126, 26, 57],
+      [181, 74, 40],
+      [230, 155, 61],
+      [246, 216, 120],
+      [117, 190, 88],
+      [52, 151, 143],
+      [27, 72, 139],
+    ],
+  },
+  plasma: {
+    name: "Plasma",
+    detail: "violet, magenta, orange, yellow",
+    colors: [
+      [13, 8, 135],
+      [75, 3, 161],
+      [125, 3, 168],
+      [168, 34, 150],
+      [203, 70, 121],
+      [229, 107, 93],
+      [240, 249, 33],
+    ],
+  },
+  cividis: {
+    name: "Cividis",
+    detail: "blue, slate, olive, yellow",
+    colors: [
+      [0, 32, 76],
+      [24, 64, 105],
+      [57, 92, 116],
+      [94, 117, 111],
+      [133, 143, 93],
+      [177, 171, 64],
+      [253, 231, 37],
+    ],
+  },
+};
+
+const COHERENCE_LEGEND_COLORS = [
+  [31, 41, 55],
+  [46, 86, 96],
+  [32, 139, 117],
+  [119, 177, 75],
+  [250, 204, 21],
+];
+
+function activeHeatmapPalette() {
+  return HEATMAP_PALETTES[state.heatmapPalette] || HEATMAP_PALETTES.spectral;
+}
+
+if (!HEATMAP_PALETTES[state.heatmapPalette]) {
+  state.heatmapPalette = "spectral";
+}
 
 const THREE_VIEW_CONFIG = {
   threeModuleUrl: "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -249,6 +336,39 @@ function getDisplayRange(layer = state.activeLayer, values = getLayerValues(laye
   };
 }
 
+function getVisibleValueRange(layer = state.activeLayer, values = getLayerValues(layer)) {
+  if (!state.data || !layer || !values) {
+    return { min: null, max: null };
+  }
+
+  let min = Infinity;
+  let max = -Infinity;
+  let count = 0;
+
+  for (let y = 0; y < values.length; y += 1) {
+    for (let x = 0; x < values[y].length; x += 1) {
+      const value = values[y][x];
+      const hiddenByFilter = isFilterableLayer(layer) && !pixelPassesFilter(y, x);
+      if (
+        !hiddenByFilter
+        && value !== null
+        && value !== undefined
+        && !Number.isNaN(value)
+      ) {
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+        count += 1;
+      }
+    }
+  }
+
+  if (!count) {
+    return { min: null, max: null };
+  }
+
+  return { min, max };
+}
+
 function percentile(sortedValues, percentileValue) {
   if (!sortedValues.length) return null;
   const index = (percentileValue / 100) * (sortedValues.length - 1);
@@ -325,36 +445,21 @@ function colorForValue(value, range, layer) {
 
   if (layer === "coherence") {
     const t = clamp(value, 0, 1);
-    return interpolateStops(t, [
-      [31, 41, 55],
-      [32, 139, 117],
-      [250, 204, 21],
-    ]);
+    const color = colorFromPalette(t, COHERENCE_LEGEND_COLORS);
+    return [...color, 255];
   }
 
   const min = range.p02 ?? range.min ?? -1;
   const max = range.p98 ?? range.max ?? 1;
   const extent = Math.max(Math.abs(min), Math.abs(max), 0.000001);
   const t = clamp((value + extent) / (2 * extent), 0, 1);
-  return interpolateStops(t, [
-    [40, 89, 173],
-    [246, 247, 240],
-    [190, 54, 45],
-  ]);
+  const color = colorFromPalette(t, activeHeatmapPalette().colors);
+  return [...color, 255];
 }
 
-function interpolateStops(t, stops) {
-  const scaled = t * (stops.length - 1);
-  const index = Math.min(Math.floor(scaled), stops.length - 2);
-  const localT = scaled - index;
-  const start = stops[index];
-  const end = stops[index + 1];
-  return [
-    Math.round(start[0] + (end[0] - start[0]) * localT),
-    Math.round(start[1] + (end[1] - start[1]) * localT),
-    Math.round(start[2] + (end[2] - start[2]) * localT),
-    255,
-  ];
+function colorFromPalette(t, palette) {
+  const index = Math.min(Math.floor(clamp(t, 0, 1) * palette.length), palette.length - 1);
+  return palette[index];
 }
 
 function clamp(value, min, max) {
@@ -1549,83 +1654,134 @@ function formatDateTime(value) {
 function updateLegend() {
   if (!state.data || !state.activeLayer) {
     els.legendTitle.textContent = "No dataset selected";
-    els.legendUnit.textContent = "-";
-    els.legendBar.style.background = "transparent";
-    els.legendMin.textContent = "-";
-    els.legendMid.textContent = "-";
-    els.legendMax.textContent = "-";
-    els.legendIndicator.hidden = true;
+    els.legendSubtitle.textContent = "-";
+    els.legendItems.replaceChildren();
     return;
   }
 
-  const range = getDisplayRange(state.activeLayer);
-  els.legendTitle.textContent = layerText[state.activeLayer].title;
-
+  const values = getLayerValues(state.activeLayer);
+  const renderRange = getDisplayRange(state.activeLayer, values);
+  const visibleRange = getVisibleValueRange(state.activeLayer, values);
   if (state.activeLayer === "coherence") {
-    els.legendUnit.textContent = "unitless";
-    els.legendBar.style.background = "linear-gradient(0deg, rgb(31,41,55), rgb(32,139,117), rgb(250,204,21))";
-    els.legendMin.textContent = "0";
-    els.legendMid.textContent = "Reliability";
-    els.legendMax.textContent = "1";
-    updateLegendIndicator();
+    els.legendTitle.textContent = "Coherence";
+    els.legendSubtitle.textContent = getCoherenceStackKind() === "pair" ? "pair reliability" : "median reliability";
+    renderLegendRows(buildLegendBins(0, 1, COHERENCE_LEGEND_COLORS.length), "unitless", state.activeLayer, renderRange);
     return;
   }
 
   const unit = state.activeLayer === "velocity" ? "mm/year" : "mm";
-  const legendRange = getLegendRange(range);
-  els.legendUnit.textContent = unit;
-  els.legendBar.style.background = "linear-gradient(0deg, rgb(40,89,173), rgb(246,247,240), rgb(190,54,45))";
-  els.legendMin.textContent = legendRange.min === null ? `No visible pixels` : `${formatNumber(legendRange.min)} ${unit}`;
-  els.legendMid.textContent = "0";
-  els.legendMax.textContent = legendRange.max === null ? "" : `${formatNumber(legendRange.max)} ${unit}`;
-  updateLegendIndicator();
-}
+  els.legendTitle.textContent = state.activeLayer === "velocity" ? `Velocity (${unit})` : `Displacement (${unit})`;
+  els.legendSubtitle.textContent = state.activeLayer === "deformation" ? getDeformationLegendDates() : "line of sight rate";
 
-function getLegendRange(range = getDisplayRange(state.activeLayer)) {
-  if (!range || range.min === null || range.max === null) {
-    return { min: null, max: null };
+  if (visibleRange.min === null || visibleRange.max === null) {
+    renderLegendMessage("No visible pixels");
+    return;
   }
-  if (state.activeLayer === "velocity" || state.activeLayer === "deformation") {
-    const extent = Math.max(Math.abs(range.min), Math.abs(range.max), 0.000001);
-    return { min: -extent, max: extent };
-  }
-  return { min: range.min, max: range.max };
+
+  renderLegendRows(
+    buildLegendBins(visibleRange.min, visibleRange.max, activeHeatmapPalette().colors.length),
+    unit,
+    state.activeLayer,
+    renderRange,
+  );
 }
 
 function updateLegendIndicator() {
-  if (!state.data || !state.activeLayer || !state.selectedPixel) {
-    els.legendIndicator.hidden = true;
-    return;
-  }
-
-  const { row, col } = state.selectedPixel;
-  const value = getLayerValues()?.[row]?.[col];
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    els.legendIndicator.hidden = true;
-    return;
-  }
-
-  const percent = legendPercentForValue(value);
-  if (percent === null) {
-    els.legendIndicator.hidden = true;
-    return;
-  }
-
-  els.legendIndicator.style.top = `${100 - percent}%`;
-  els.legendIndicator.hidden = false;
+  updateLegend();
 }
 
-function legendPercentForValue(value) {
-  if (state.activeLayer === "coherence") {
-    return clamp(value, 0, 1) * 100;
-  }
+function buildLegendBins(min, max, count) {
+  if (max < min) return [];
+  if (max === min) return [{ low: min, high: max }];
+  const step = (max - min) / count;
+  return Array.from({ length: count }, (_, index) => {
+    const low = min + step * index;
+    const high = index === count - 1 ? max : min + step * (index + 1);
+    return { low, high };
+  });
+}
 
-  const range = getLegendRange();
-  if (range.min === null || range.max === null) return null;
-  const min = range.min;
-  const max = range.max;
-  if (max <= min) return null;
-  return clamp(((value - min) / (max - min)) * 100, 0, 100);
+function renderLegendRows(bins, unit, layer, renderRange) {
+  const selectedValue = getSelectedLegendValue();
+  const rows = bins.map((bin, index) => {
+    const row = document.createElement("div");
+    row.className = "map-legend-row";
+    if (selectedValue !== null && valueInLegendBin(selectedValue, bin, index, bins.length)) {
+      row.classList.add("is-active");
+    }
+
+    const swatch = document.createElement("span");
+    swatch.className = "map-legend-swatch";
+    swatch.style.backgroundColor = rgbCss(colorForValue((bin.low + bin.high) / 2, renderRange, layer));
+
+    const label = document.createElement("span");
+    label.className = "map-legend-label";
+    label.textContent = `${formatLegendNumber(bin.low)} - ${formatLegendNumber(bin.high)}`;
+    label.title = unit;
+
+    row.append(swatch, label);
+    return row;
+  });
+
+  els.legendItems.replaceChildren(...rows);
+}
+
+function renderLegendMessage(message) {
+  const row = document.createElement("div");
+  row.className = "map-legend-row";
+  const swatch = document.createElement("span");
+  swatch.className = "map-legend-swatch";
+  swatch.style.backgroundColor = "rgba(17, 17, 17, 0.18)";
+  const label = document.createElement("span");
+  label.className = "map-legend-label";
+  label.textContent = message;
+  row.append(swatch, label);
+  els.legendItems.replaceChildren(row);
+}
+
+function getSelectedLegendValue() {
+  if (!state.data || !state.activeLayer || !state.selectedPixel) return null;
+  const { row, col } = state.selectedPixel;
+  const value = getLayerValues()?.[row]?.[col];
+  return value === null || value === undefined || Number.isNaN(value) ? null : value;
+}
+
+function valueInLegendBin(value, bin, index, totalBins) {
+  if (index === 0) return value >= bin.low && value <= bin.high;
+  if (index === totalBins - 1) return value > bin.low && value <= bin.high;
+  return value > bin.low && value <= bin.high;
+}
+
+function rgbCss(color) {
+  return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+}
+
+function formatLegendNumber(value) {
+  if (Math.abs(value) < 0.05) return "0";
+  return Number(value).toLocaleString(undefined, {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 1,
+  });
+}
+
+function getDeformationLegendDates() {
+  const dates = state.data?.dates ?? [];
+  if (!dates.length) return "date range unavailable";
+  const start = dates[0];
+  const end = dates[clamp(state.dateIndex, 0, dates.length - 1)] ?? dates[dates.length - 1];
+  return `${formatLegendDate(start)} - ${formatLegendDate(end)}`;
+}
+
+function formatLegendDate(value) {
+  if (!value) return "-";
+  const parts = String(value).split("-");
+  if (parts.length !== 3) return value;
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthIndex = Number(parts[1]) - 1;
+  const day = Number(parts[2]);
+  const year = String(parts[0]).slice(-2);
+  if (!monthNames[monthIndex] || Number.isNaN(day)) return value;
+  return `${day}-${monthNames[monthIndex]}-${year}`;
 }
 
 function updatePixelInfo() {
@@ -1816,6 +1972,85 @@ function closeDatasetModal() {
   els.datasetInfoButton.focus();
 }
 
+function openSettingsModal() {
+  renderHeatmapOptions();
+  setSettingsPanel("heatmaps");
+  els.settingsModal.hidden = false;
+  els.settingsModal.setAttribute("aria-hidden", "false");
+  els.settingsModalClose.focus();
+}
+
+function closeSettingsModal() {
+  els.settingsModal.hidden = true;
+  els.settingsModal.setAttribute("aria-hidden", "true");
+  els.settingsButton.focus();
+}
+
+function setSettingsPanel(panelName) {
+  els.settingsNavButtons.forEach((button) => {
+    const isActive = button.dataset.settingsPanel === panelName;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+
+  els.settingsContents.forEach((section) => {
+    section.hidden = section.dataset.settingsContent !== panelName;
+  });
+}
+
+function renderHeatmapOptions() {
+  const options = Object.entries(HEATMAP_PALETTES).map(([key, palette]) => {
+    const button = document.createElement("button");
+    button.className = "heatmap-option";
+    button.type = "button";
+    button.dataset.palette = key;
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", String(key === state.heatmapPalette));
+    button.classList.toggle("active", key === state.heatmapPalette);
+
+    const label = document.createElement("span");
+    label.className = "heatmap-option-label";
+    label.textContent = palette.name;
+
+    const detail = document.createElement("span");
+    detail.className = "heatmap-option-detail";
+    detail.textContent = palette.detail;
+
+    const preview = document.createElement("span");
+    preview.className = "heatmap-preview";
+    preview.style.background = paletteGradient(palette.colors);
+
+    const steps = document.createElement("span");
+    steps.className = "heatmap-steps";
+    palette.colors.forEach((color) => {
+      const swatch = document.createElement("span");
+      swatch.style.backgroundColor = rgbCss(color);
+      steps.appendChild(swatch);
+    });
+
+    button.append(label, detail, preview, steps);
+    return button;
+  });
+
+  els.heatmapOptions.replaceChildren(...options);
+}
+
+function selectHeatmapPalette(paletteKey) {
+  if (!HEATMAP_PALETTES[paletteKey]) return;
+  state.heatmapPalette = paletteKey;
+  localStorage.setItem("insar-heatmap-palette", paletteKey);
+  renderHeatmapOptions();
+  drawMap();
+}
+
+function paletteGradient(colors) {
+  const stops = colors.map((color, index) => {
+    const percent = colors.length === 1 ? 0 : (index / (colors.length - 1)) * 100;
+    return `${rgbCss(color)} ${percent}%`;
+  });
+  return `linear-gradient(90deg, ${stops.join(", ")})`;
+}
+
 function selectedLayerNames() {
   return state.selectedLayer ? [layerText[state.selectedLayer].title] : [];
 }
@@ -1887,6 +2122,10 @@ els.datasetInfoButton.addEventListener("click", () => {
   openDatasetModal();
 });
 
+els.settingsButton.addEventListener("click", () => {
+  openSettingsModal();
+});
+
 els.view3dToggle.addEventListener("click", () => {
   state.is3D = !state.is3D;
   localStorage.setItem("insar-view-mode", state.is3D ? "3d" : "2d");
@@ -1914,15 +2153,38 @@ els.datasetModal.addEventListener("click", (event) => {
   }
 });
 
+els.settingsModalClose.addEventListener("click", closeSettingsModal);
+els.settingsModal.addEventListener("click", (event) => {
+  if (event.target === els.settingsModal) {
+    closeSettingsModal();
+  }
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !els.datasetModal.hidden) {
     closeDatasetModal();
+  }
+
+  if (event.key === "Escape" && !els.settingsModal.hidden) {
+    closeSettingsModal();
   }
 
   if (event.key === "Escape" && !els.datasetSelectPopover.hidden) {
     setDatasetSelectOpen(false);
     els.datasetSelectButton.focus();
   }
+});
+
+els.settingsNavButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setSettingsPanel(button.dataset.settingsPanel);
+  });
+});
+
+els.heatmapOptions.addEventListener("click", (event) => {
+  const option = event.target.closest(".heatmap-option");
+  if (!option) return;
+  selectHeatmapPalette(option.dataset.palette);
 });
 
 els.datasetSelectButton.addEventListener("click", () => {

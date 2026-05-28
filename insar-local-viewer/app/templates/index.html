@@ -41,6 +41,54 @@
       </div>
     </section>
 
+    <section id="settings-modal" class="modal-backdrop" aria-hidden="true" hidden>
+      <div class="modal-window settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+        <header class="modal-header">
+          <div>
+            <h2 id="settings-modal-title">Settings</h2>
+            <p>Workspace display preferences</p>
+          </div>
+          <button id="settings-modal-close" class="window-button" type="button" aria-label="Close settings">x</button>
+        </header>
+        <div class="settings-body">
+          <nav class="settings-nav" aria-label="Settings sections">
+            <button class="settings-nav-button active" type="button" data-settings-panel="heatmaps" aria-pressed="true">Heatmaps</button>
+            <button class="settings-nav-button" type="button" data-settings-panel="map" aria-pressed="false">Map</button>
+            <button class="settings-nav-button" type="button" data-settings-panel="quality" aria-pressed="false">Quality</button>
+            <button class="settings-nav-button" type="button" data-settings-panel="workspace" aria-pressed="false">Workspace</button>
+          </nav>
+          <section class="settings-content" data-settings-content="heatmaps">
+            <header class="settings-content-header">
+              <h3>Heatmaps</h3>
+              <p>Pixel color palette</p>
+            </header>
+            <div id="heatmap-options" class="heatmap-options" role="radiogroup" aria-label="Pixel heatmap palette"></div>
+          </section>
+          <section class="settings-content" data-settings-content="map" hidden>
+            <header class="settings-content-header">
+              <h3>Map</h3>
+              <p>View controls</p>
+            </header>
+            <div class="settings-empty">No map settings yet</div>
+          </section>
+          <section class="settings-content" data-settings-content="quality" hidden>
+            <header class="settings-content-header">
+              <h3>Quality</h3>
+              <p>Filtering defaults</p>
+            </header>
+            <div class="settings-empty">No quality settings yet</div>
+          </section>
+          <section class="settings-content" data-settings-content="workspace" hidden>
+            <header class="settings-content-header">
+              <h3>Workspace</h3>
+              <p>Application preferences</p>
+            </header>
+            <div class="settings-empty">No workspace settings yet</div>
+          </section>
+        </div>
+      </div>
+    </section>
+
     <main class="app-shell">
       <section class="viewer-grid">
         <aside id="sidebar" class="sidebar" aria-label="Map controls">
@@ -57,6 +105,10 @@
                 <button id="dataset-info-button" class="action-row" type="button">
                   <img class="action-icon" src="{{ url_for('assets', filename='icons/dataset.svg') }}" alt="" aria-hidden="true">
                   <span>Dataset</span>
+                </button>
+                <button id="settings-button" class="action-row" type="button">
+                  <img class="action-icon" src="{{ url_for('assets', filename='icons/settings.svg') }}" alt="" aria-hidden="true">
+                  <span>Settings</span>
                 </button>
               </div>
             </section>
@@ -114,23 +166,10 @@
             <div id="map-placeholder" class="map-placeholder">Load a processed project folder to display the map.</div>
             <aside id="map-legend" class="map-legend" aria-label="Map legend">
               <div class="map-legend-header">
-                <span class="map-legend-eyebrow">Legend</span>
                 <strong id="legend-title">No dataset selected</strong>
-                <span id="legend-unit" class="map-legend-unit">-</span>
+                <span id="legend-subtitle" class="map-legend-subtitle">-</span>
               </div>
-              <div class="map-legend-body">
-                <div class="map-legend-scale">
-                  <span id="legend-max">-</span>
-                  <span id="legend-mid">-</span>
-                  <span id="legend-min">-</span>
-                </div>
-                <div class="map-legend-track-wrap">
-                  <div id="legend-bar" class="map-legend-track"></div>
-                  <div id="legend-indicator" class="map-legend-indicator" hidden>
-                    <span aria-hidden="true"></span>
-                  </div>
-                </div>
-              </div>
+              <div id="legend-items" class="map-legend-items" aria-live="polite"></div>
             </aside>
             <div class="map-toolbar" aria-label="Map view controls">
               <button id="view-3d-toggle" class="map-toggle-button" type="button" aria-pressed="false" title="Toggle 3D view. Drag to orbit, Shift-drag or right-drag to pan, scroll to zoom.">
