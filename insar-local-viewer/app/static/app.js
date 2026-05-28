@@ -182,6 +182,8 @@ const COHERENCE_LEGEND_COLORS = [
   [250, 204, 21],
 ];
 
+const NEUTRAL_HEATMAP_COLOR = [230, 231, 224];
+
 function activeHeatmapPalette() {
   return HEATMAP_PALETTES[state.heatmapPalette] || HEATMAP_PALETTES.spectral;
 }
@@ -299,25 +301,8 @@ function getDisplayRange(layer = state.activeLayer, values = getLayerValues(laye
     return state.data.layers.coherence.range;
   }
 
-  const rangeValues = layer === "deformation"
-    ? getFinalDeformationValues()
-    : values;
-  if (!rangeValues) return getLayerRange(layer);
-
-  const visibleValues = [];
-
-  for (let y = 0; y < rangeValues.length; y += 1) {
-    for (let x = 0; x < rangeValues[y].length; x += 1) {
-      const value = rangeValues[y][x];
-      if (
-        value !== null
-        && !Number.isNaN(value)
-        && pixelPassesFilter(y, x)
-      ) {
-        visibleValues.push(value);
-      }
-    }
-  }
+  const scaleValues = getScaleValues(layer, values);
+  const visibleValues = getVisibleValues(layer, scaleValues);
 
   if (!visibleValues.length) {
     return { min: null, max: null, p02: null, p98: null };
@@ -333,18 +318,14 @@ function getDisplayRange(layer = state.activeLayer, values = getLayerValues(laye
     max: visibleValues[visibleValues.length - 1],
     p02: -extent,
     p98: extent,
+    zeroHalfWidth: zeroBandHalfWidth(layer, -extent, extent),
   };
 }
 
-function getVisibleValueRange(layer = state.activeLayer, values = getLayerValues(layer)) {
-  if (!state.data || !layer || !values) {
-    return { min: null, max: null };
-  }
+function getVisibleValues(layer = state.activeLayer, values = getLayerValues(layer)) {
+  if (!state.data || !layer || !values) return [];
 
-  let min = Infinity;
-  let max = -Infinity;
-  let count = 0;
-
+  const visibleValues = [];
   for (let y = 0; y < values.length; y += 1) {
     for (let x = 0; x < values[y].length; x += 1) {
       const value = values[y][x];
@@ -355,18 +336,18 @@ function getVisibleValueRange(layer = state.activeLayer, values = getLayerValues
         && value !== undefined
         && !Number.isNaN(value)
       ) {
-        min = Math.min(min, value);
-        max = Math.max(max, value);
-        count += 1;
+        visibleValues.push(value);
       }
     }
   }
+  return visibleValues;
+}
 
-  if (!count) {
-    return { min: null, max: null };
+function getScaleValues(layer = state.activeLayer, values = getLayerValues(layer)) {
+  if (layer === "deformation") {
+    return getFinalDeformationValues() || values;
   }
-
-  return { min, max };
+  return values;
 }
 
 function percentile(sortedValues, percentileValue) {
@@ -377,6 +358,21 @@ function percentile(sortedValues, percentileValue) {
   if (lower === upper) return sortedValues[lower];
   const weight = index - lower;
   return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
+}
+
+function zeroBandHalfWidth(layer, min, max) {
+  const extent = Math.max(Math.abs(min), Math.abs(max), 0.000001);
+  const preferred = layer === "velocity" ? 10 : 5;
+  return Math.min(preferred, Math.max(extent * 0.08, extent / 8));
+}
+
+function blendColors(color, towardColor, amount) {
+  const t = clamp(amount, 0, 1);
+  return [
+    Math.round(color[0] + (towardColor[0] - color[0]) * t),
+    Math.round(color[1] + (towardColor[1] - color[1]) * t),
+    Math.round(color[2] + (towardColor[2] - color[2]) * t),
+  ];
 }
 
 function isFilterableLayer(layer = state.activeLayer) {
@@ -452,14 +448,48 @@ function colorForValue(value, range, layer) {
   const min = range.p02 ?? range.min ?? -1;
   const max = range.p98 ?? range.max ?? 1;
   const extent = Math.max(Math.abs(min), Math.abs(max), 0.000001);
-  const t = clamp((value + extent) / (2 * extent), 0, 1);
-  const color = colorFromPalette(t, activeHeatmapPalette().colors);
+  const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, -extent, extent);
+  const color = colorForDivergingValue(value, extent, neutral);
   return [...color, 255];
 }
 
 function colorFromPalette(t, palette) {
   const index = Math.min(Math.floor(clamp(t, 0, 1) * palette.length), palette.length - 1);
   return palette[index];
+}
+
+function colorForDivergingValue(value, extent, neutralHalfWidth) {
+  const palette = activeHeatmapPalette().colors;
+  const last = palette.length - 1;
+  const negativeExtreme = palette[0];
+  const negativeNear = blendColors(palette[Math.min(2, last)], NEUTRAL_HEATMAP_COLOR, 0.78);
+  const positiveExtreme = palette[last];
+  const positiveNear = blendColors(palette[Math.max(0, last - 2)], NEUTRAL_HEATMAP_COLOR, 0.78);
+
+  if (value < -neutralHalfWidth) {
+    const t = clamp((-value - neutralHalfWidth) / Math.max(0.000001, extent - neutralHalfWidth), 0, 1);
+    return interpolateColor(negativeNear, negativeExtreme, Math.pow(t, 1.45));
+  }
+  if (value > neutralHalfWidth) {
+    const t = clamp((value - neutralHalfWidth) / Math.max(0.000001, extent - neutralHalfWidth), 0, 1);
+    return interpolateColor(positiveNear, positiveExtreme, Math.pow(t, 1.45));
+  }
+
+  if (value < 0) {
+    const t = clamp(-value / Math.max(0.000001, neutralHalfWidth), 0, 1);
+    return interpolateColor(NEUTRAL_HEATMAP_COLOR, negativeNear, Math.pow(t, 2.2));
+  }
+
+  const t = clamp(value / Math.max(0.000001, neutralHalfWidth), 0, 1);
+  return interpolateColor(NEUTRAL_HEATMAP_COLOR, positiveNear, Math.pow(t, 2.2));
+}
+
+function interpolateColor(start, end, t) {
+  return [
+    Math.round(start[0] + (end[0] - start[0]) * t),
+    Math.round(start[1] + (end[1] - start[1]) * t),
+    Math.round(start[2] + (end[2] - start[2]) * t),
+  ];
 }
 
 function clamp(value, min, max) {
@@ -1661,7 +1691,6 @@ function updateLegend() {
 
   const values = getLayerValues(state.activeLayer);
   const renderRange = getDisplayRange(state.activeLayer, values);
-  const visibleRange = getVisibleValueRange(state.activeLayer, values);
   if (state.activeLayer === "coherence") {
     els.legendTitle.textContent = "Coherence";
     els.legendSubtitle.textContent = getCoherenceStackKind() === "pair" ? "pair reliability" : "median reliability";
@@ -1671,19 +1700,14 @@ function updateLegend() {
 
   const unit = state.activeLayer === "velocity" ? "mm/year" : "mm";
   els.legendTitle.textContent = state.activeLayer === "velocity" ? `Velocity (${unit})` : `Displacement (${unit})`;
-  els.legendSubtitle.textContent = state.activeLayer === "deformation" ? getDeformationLegendDates() : "line of sight rate";
+  els.legendSubtitle.textContent = state.activeLayer === "deformation" ? `${getDeformationLegendDates()} scale` : "line of sight rate";
 
-  if (visibleRange.min === null || visibleRange.max === null) {
+  if (renderRange.p02 === null || renderRange.p98 === null) {
     renderLegendMessage("No visible pixels");
     return;
   }
 
-  renderLegendRows(
-    buildLegendBins(visibleRange.min, visibleRange.max, activeHeatmapPalette().colors.length),
-    unit,
-    state.activeLayer,
-    renderRange,
-  );
+  renderContinuousLegend(renderRange, unit, state.activeLayer);
 }
 
 function updateLegendIndicator() {
@@ -1712,7 +1736,7 @@ function renderLegendRows(bins, unit, layer, renderRange) {
 
     const swatch = document.createElement("span");
     swatch.className = "map-legend-swatch";
-    swatch.style.backgroundColor = rgbCss(colorForValue((bin.low + bin.high) / 2, renderRange, layer));
+    swatch.style.backgroundColor = rgbCss(bin.color || colorForValue((bin.low + bin.high) / 2, renderRange, layer));
 
     const label = document.createElement("span");
     label.className = "map-legend-label";
@@ -1724,6 +1748,42 @@ function renderLegendRows(bins, unit, layer, renderRange) {
   });
 
   els.legendItems.replaceChildren(...rows);
+}
+
+function renderContinuousLegend(range, unit, layer) {
+  const extent = Math.max(Math.abs(range.p02 ?? 0), Math.abs(range.p98 ?? 0), 0.000001);
+  const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, -extent, extent);
+  const values = [extent, neutral, 0, -neutral, -extent];
+
+  const wrap = document.createElement("div");
+  wrap.className = "map-legend-continuous";
+
+  const gradient = document.createElement("div");
+  gradient.className = "map-legend-gradient";
+  gradient.style.background = continuousLegendGradient(extent, neutral);
+
+  const ticks = document.createElement("div");
+  ticks.className = "map-legend-ticks";
+  values.forEach((value) => {
+    const tick = document.createElement("span");
+    tick.textContent = formatLegendNumber(value);
+    tick.title = unit;
+    ticks.appendChild(tick);
+  });
+
+  wrap.append(gradient, ticks);
+  els.legendItems.replaceChildren(wrap);
+}
+
+function continuousLegendGradient(extent, neutralHalfWidth) {
+  const stops = [];
+  const sampleCount = 24;
+  for (let index = 0; index <= sampleCount; index += 1) {
+    const percent = (index / sampleCount) * 100;
+    const value = extent - (2 * extent * index) / sampleCount;
+    stops.push(`${rgbCss(colorForDivergingValue(value, extent, neutralHalfWidth))} ${percent}%`);
+  }
+  return `linear-gradient(180deg, ${stops.join(", ")})`;
 }
 
 function renderLegendMessage(message) {
