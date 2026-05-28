@@ -635,6 +635,34 @@ button:active {
   z-index: 850;
 }
 
+.map-context-menu {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  min-width: 214px;
+  padding: 5px;
+  position: absolute;
+  z-index: 1600;
+}
+
+.map-context-menu button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  justify-content: start;
+  min-height: 34px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.map-context-menu button:hover {
+  background: var(--sidebar-hover);
+  transform: none;
+}
+
 .map-toggle-button {
   align-items: center;
   background: rgba(255, 255, 255, 0.96);
@@ -1205,7 +1233,7 @@ button:active {
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   font-weight: 650;
-  grid-template-rows: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   line-height: 1.05;
 }
 

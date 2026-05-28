@@ -77,6 +77,8 @@ const els = {
   map: document.querySelector("#map"),
   map3d: document.querySelector("#map-3d"),
   mapPlaceholder: document.querySelector("#map-placeholder"),
+  mapContextMenu: document.querySelector("#map-context-menu"),
+  exportMapImageButton: document.querySelector("#export-map-image-button"),
   view3dToggle: document.querySelector("#view-3d-toggle"),
   verticalExaggerationControl: document.querySelector("#vertical-exaggeration-control"),
   verticalExaggerationSlider: document.querySelector("#vertical-exaggeration-slider"),
@@ -120,43 +122,17 @@ const HEATMAP_PALETTES = {
       [37, 96, 173],
     ],
   },
-  highContrast: {
-    name: "High contrast",
-    detail: "crimson, orange, ivory, teal, navy",
+  jet: {
+    name: "Jet / InSAR",
+    detail: "classic blue, cyan, yellow, red",
     colors: [
-      [103, 0, 31],
-      [178, 24, 43],
-      [239, 138, 98],
-      [247, 247, 247],
-      [102, 194, 165],
-      [33, 102, 172],
-      [5, 48, 97],
-    ],
-  },
-  terrain: {
-    name: "Terrain",
-    detail: "burgundy, copper, gold, leaf, deep water",
-    colors: [
-      [126, 26, 57],
-      [181, 74, 40],
-      [230, 155, 61],
-      [246, 216, 120],
-      [117, 190, 88],
-      [52, 151, 143],
-      [27, 72, 139],
-    ],
-  },
-  plasma: {
-    name: "Plasma",
-    detail: "violet, magenta, orange, yellow",
-    colors: [
-      [13, 8, 135],
-      [75, 3, 161],
-      [125, 3, 168],
-      [168, 34, 150],
-      [203, 70, 121],
-      [229, 107, 93],
-      [240, 249, 33],
+      [0, 0, 130],
+      [0, 68, 255],
+      [0, 205, 255],
+      [92, 255, 155],
+      [255, 238, 0],
+      [255, 122, 0],
+      [180, 0, 0],
     ],
   },
   cividis: {
@@ -181,8 +157,6 @@ const COHERENCE_LEGEND_COLORS = [
   [119, 177, 75],
   [250, 204, 21],
 ];
-
-const NEUTRAL_HEATMAP_COLOR = [230, 231, 224];
 
 function activeHeatmapPalette() {
   return HEATMAP_PALETTES[state.heatmapPalette] || HEATMAP_PALETTES.spectral;
@@ -362,8 +336,10 @@ function percentile(sortedValues, percentileValue) {
 
 function zeroBandHalfWidth(layer, min, max) {
   const extent = Math.max(Math.abs(min), Math.abs(max), 0.000001);
-  const preferred = layer === "velocity" ? 10 : 5;
-  return Math.min(preferred, Math.max(extent * 0.08, extent / 8));
+  if (layer === "deformation") {
+    return Math.min(9, Math.max(4, extent * 0.095));
+  }
+  return Math.min(14, Math.max(5, extent * 0.095));
 }
 
 function blendColors(color, towardColor, amount) {
@@ -462,26 +438,25 @@ function colorForDivergingValue(value, extent, neutralHalfWidth) {
   const palette = activeHeatmapPalette().colors;
   const last = palette.length - 1;
   const negativeExtreme = palette[0];
-  const negativeNear = blendColors(palette[Math.min(2, last)], NEUTRAL_HEATMAP_COLOR, 0.78);
+  const neutralColor = colorFromPalette(0.5, palette);
+  const negativeNear = blendColors(palette[Math.min(2, last)], neutralColor, 0.6);
   const positiveExtreme = palette[last];
-  const positiveNear = blendColors(palette[Math.max(0, last - 2)], NEUTRAL_HEATMAP_COLOR, 0.78);
+  const positiveNear = blendColors(palette[Math.max(0, last - 2)], neutralColor, 0.6);
+
+  if (Math.abs(value) <= neutralHalfWidth) {
+    return neutralColor;
+  }
 
   if (value < -neutralHalfWidth) {
     const t = clamp((-value - neutralHalfWidth) / Math.max(0.000001, extent - neutralHalfWidth), 0, 1);
-    return interpolateColor(negativeNear, negativeExtreme, Math.pow(t, 1.45));
+    return interpolateColor(negativeNear, negativeExtreme, Math.pow(t, 1.65));
   }
   if (value > neutralHalfWidth) {
     const t = clamp((value - neutralHalfWidth) / Math.max(0.000001, extent - neutralHalfWidth), 0, 1);
-    return interpolateColor(positiveNear, positiveExtreme, Math.pow(t, 1.45));
+    return interpolateColor(positiveNear, positiveExtreme, Math.pow(t, 1.65));
   }
 
-  if (value < 0) {
-    const t = clamp(-value / Math.max(0.000001, neutralHalfWidth), 0, 1);
-    return interpolateColor(NEUTRAL_HEATMAP_COLOR, negativeNear, Math.pow(t, 2.2));
-  }
-
-  const t = clamp(value / Math.max(0.000001, neutralHalfWidth), 0, 1);
-  return interpolateColor(NEUTRAL_HEATMAP_COLOR, positiveNear, Math.pow(t, 2.2));
+  return neutralColor;
 }
 
 function interpolateColor(start, end, t) {
@@ -513,10 +488,12 @@ function initializeMap() {
   const baseLayers = {
     "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
+      crossOrigin: true,
       attribution: "&copy; OpenStreetMap contributors",
     }),
     "Carto Light": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
       maxZoom: 20,
+      crossOrigin: true,
       attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
       subdomains: "abcd",
     }),
@@ -524,6 +501,7 @@ function initializeMap() {
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       {
         maxZoom: 18,
+        crossOrigin: true,
         attribution: "Esri",
       },
     ),
@@ -810,6 +788,238 @@ function drawSelectedPixelTile(ctx, coords, tileSize) {
   ctx.stroke();
 }
 
+function showMapContextMenu(event) {
+  if (!state.map) return;
+  event.preventDefault();
+  const frame = els.mapFrame.getBoundingClientRect();
+  const menuWidth = 230;
+  const menuHeight = 48;
+  const x = clamp(event.clientX - frame.left, 8, Math.max(8, frame.width - menuWidth - 8));
+  const y = clamp(event.clientY - frame.top, 8, Math.max(8, frame.height - menuHeight - 8));
+  els.mapContextMenu.style.left = `${x}px`;
+  els.mapContextMenu.style.top = `${y}px`;
+  els.mapContextMenu.hidden = false;
+}
+
+function hideMapContextMenu() {
+  els.mapContextMenu.hidden = true;
+}
+
+async function exportMapImage() {
+  hideMapContextMenu();
+  if (!state.map) return;
+  setStatus("Exporting high-resolution map...");
+
+  try {
+    if (state.is3D && state.scene3D) {
+      await export3DMapImage();
+      setStatus("High-resolution 3D map exported.", "success");
+      return;
+    }
+
+    const scale = 3;
+    const rect = els.map.getBoundingClientRect();
+    const width = Math.max(1, Math.round(rect.width));
+    const height = Math.max(1, Math.round(rect.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.fillStyle = "#e9e7dc";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    await drawVisibleMapTilesForExport(ctx, scale);
+    drawRasterForExport(ctx, scale);
+    drawSelectedPixelForExport(ctx, scale);
+    drawExportStamp(ctx, scale);
+
+    const blob = await canvasToBlob(canvas);
+    downloadBlob(blob, exportMapFilename());
+    setStatus("High-resolution map exported.", "success");
+  } catch (error) {
+    setStatus(`Could not export map: ${error.message}`, "error");
+  }
+}
+
+async function export3DMapImage() {
+  const view = state.scene3D;
+  if (!view) throw new Error("3D scene is not ready.");
+
+  const scale = 3;
+  const rect = els.map3d.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width));
+  const height = Math.max(1, Math.round(rect.height));
+  const exportWidth = width * scale;
+  const exportHeight = height * scale;
+  const previousPixelRatio = view.renderer.getPixelRatio();
+  const previousAspect = view.camera.aspect;
+  let blob;
+
+  try {
+    view.renderer.setPixelRatio(1);
+    view.renderer.setSize(exportWidth, exportHeight, false);
+    view.camera.aspect = exportWidth / exportHeight;
+    view.camera.updateProjectionMatrix();
+    apply3DCamera();
+    view.renderer.render(view.scene, view.camera);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = exportWidth;
+    canvas.height = exportHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(view.renderer.domElement, 0, 0, exportWidth, exportHeight);
+    drawExportStamp(ctx, scale);
+    blob = await canvasToBlob(canvas);
+  } finally {
+    view.renderer.setPixelRatio(previousPixelRatio);
+    view.camera.aspect = previousAspect;
+    view.camera.updateProjectionMatrix();
+    resize3DScene();
+    apply3DCamera();
+    view.renderer.render(view.scene, view.camera);
+  }
+
+  downloadBlob(blob, exportMapFilename("3d"));
+}
+
+async function drawVisibleMapTilesForExport(ctx, scale) {
+  const mapRect = els.map.getBoundingClientRect();
+  const tiles = Array.from(els.map.querySelectorAll(".leaflet-tile-loaded"));
+  await Promise.all(tiles.map((tile) => {
+    if (!(tile instanceof HTMLImageElement) || !tile.complete || !tile.naturalWidth) {
+      return Promise.resolve();
+    }
+    const tileRect = tile.getBoundingClientRect();
+    const x = (tileRect.left - mapRect.left) * scale;
+    const y = (tileRect.top - mapRect.top) * scale;
+    const width = tileRect.width * scale;
+    const height = tileRect.height * scale;
+    try {
+      ctx.drawImage(tile, x, y, width, height);
+    } catch {
+      // Some third-party tiles may reject canvas export; the raster layer still exports.
+    }
+    return Promise.resolve();
+  }));
+}
+
+function drawRasterForExport(ctx, scale) {
+  if (!state.data || !state.activeLayer || !state.rasterValues || !state.rasterRange) return;
+  if (state.rasterRange.p02 === null && state.activeLayer !== "coherence") return;
+  drawPixelGridForExport(ctx, scale, state.rasterValues, ({ value }) => colorForValue(value, state.rasterRange, state.activeLayer));
+}
+
+function drawSelectedPixelForExport(ctx, scale) {
+  if (!state.data || !state.selectedPixel) return;
+  const { row, col } = state.selectedPixel;
+  drawPixelGridForExport(ctx, scale, [[state.rasterValues?.[row]?.[col] ?? 0]], () => [0, 0, 0, 0], { selectedOnly: { row, col } });
+}
+
+function drawPixelGridForExport(ctx, scale, values, colorResolver, options = {}) {
+  const latEdges = axisEdges(state.data.lat);
+  const lonEdges = axisEdges(state.data.lon);
+  const rows = options.selectedOnly ? [options.selectedOnly.row] : values.map((_, index) => index);
+
+  rows.forEach((row) => {
+    const cols = options.selectedOnly ? [options.selectedOnly.col] : values[row].map((_, index) => index);
+    const south = Math.min(latEdges[row], latEdges[row + 1]);
+    const north = Math.max(latEdges[row], latEdges[row + 1]);
+
+    cols.forEach((col) => {
+      const value = options.selectedOnly ? state.rasterValues?.[row]?.[col] : values[row][col];
+      const hiddenByFilter = isFilterableLayer() && !pixelPassesFilter(row, col);
+      if (!options.selectedOnly && (hiddenByFilter || value === null || value === undefined || Number.isNaN(value))) return;
+
+      const west = Math.min(lonEdges[col], lonEdges[col + 1]);
+      const east = Math.max(lonEdges[col], lonEdges[col + 1]);
+      const northWest = state.map.latLngToContainerPoint([north, west]);
+      const southEast = state.map.latLngToContainerPoint([south, east]);
+      const width = Math.max(1, (southEast.x - northWest.x) * scale);
+      const height = Math.max(1, (southEast.y - northWest.y) * scale);
+      const radius = Math.max(1, Math.min(width, height) * 0.48);
+      const centerX = (northWest.x + (southEast.x - northWest.x) / 2) * scale;
+      const centerY = (northWest.y + (southEast.y - northWest.y) / 2) * scale;
+
+      if (options.selectedOnly) {
+        const ringWidth = Math.max(3, Math.min(8, radius * 0.42));
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius + ringWidth * 0.8, 0, Math.PI * 2);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = ringWidth + 3;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius + ringWidth * 0.8, 0, Math.PI * 2);
+        ctx.strokeStyle = "#fcd900";
+        ctx.lineWidth = ringWidth;
+        ctx.stroke();
+        return;
+      }
+
+      const color = colorResolver({ value, row, col });
+      ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+}
+
+function drawExportStamp(ctx, scale) {
+  if (!state.data || !state.activeLayer) return;
+  const padding = 14 * scale;
+  const lineHeight = 16 * scale;
+  const title = state.activeLayer === "deformation"
+    ? `Displacement ${state.data.dates[state.dateIndex] || ""}`
+    : layerText[state.activeLayer]?.title || "InSAR map";
+  const subtitle = projectFolderName(state.data.project.project_path);
+  ctx.save();
+  ctx.font = `${12 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  const width = Math.max(ctx.measureText(title).width, ctx.measureText(subtitle).width) + padding * 2;
+  const height = lineHeight * 2 + padding * 1.4;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
+  ctx.fillRect(padding, padding, width, height);
+  ctx.fillStyle = "#111111";
+  ctx.font = `800 ${13 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  ctx.fillText(title, padding * 1.6, padding + lineHeight);
+  ctx.fillStyle = "#555555";
+  ctx.font = `600 ${10 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  ctx.fillText(subtitle, padding * 1.6, padding + lineHeight * 2);
+  ctx.restore();
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("The browser could not create the PNG."));
+      }, "image/png");
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportMapFilename(viewMode = state.is3D ? "3d" : "2d") {
+  const layer = state.activeLayer || "map";
+  const date = state.activeLayer === "deformation" ? state.data?.dates[state.dateIndex] : "";
+  const suffix = date ? `-${date}` : "";
+  return `insar-${layer}-${viewMode}${suffix}-${new Date().toISOString().slice(0, 10)}.png`;
+}
+
 function handleLeafletMapClick(event) {
   if (!state.data) return;
   if (!leafletBounds().contains(event.latlng)) return;
@@ -900,7 +1110,7 @@ function ensure3DScene() {
   scene.background = new THREE.Color(0x26303a);
 
   const camera = new THREE.PerspectiveCamera(50, 1, 1, 1000000);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
@@ -957,7 +1167,7 @@ function initialize3DInteractions(view) {
       theta: view.controls.theta,
       phi: view.controls.phi,
       target: view.controls.target.clone(),
-      pan: event.button === 2 || event.shiftKey || event.ctrlKey || event.metaKey,
+      pan: event.button === 1 || event.shiftKey || event.ctrlKey || event.metaKey,
       moved: false,
     };
   });
@@ -1753,7 +1963,7 @@ function renderLegendRows(bins, unit, layer, renderRange) {
 function renderContinuousLegend(range, unit, layer) {
   const extent = Math.max(Math.abs(range.p02 ?? 0), Math.abs(range.p98 ?? 0), 0.000001);
   const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, -extent, extent);
-  const values = [extent, neutral, 0, -neutral, -extent];
+  const values = [extent, 0, -extent];
 
   const wrap = document.createElement("div");
   wrap.className = "map-legend-continuous";
@@ -2186,6 +2396,9 @@ els.settingsButton.addEventListener("click", () => {
   openSettingsModal();
 });
 
+els.mapFrame.addEventListener("contextmenu", showMapContextMenu, true);
+els.exportMapImageButton.addEventListener("click", exportMapImage);
+
 els.view3dToggle.addEventListener("click", () => {
   state.is3D = !state.is3D;
   localStorage.setItem("insar-view-mode", state.is3D ? "3d" : "2d");
@@ -2229,6 +2442,10 @@ document.addEventListener("keydown", (event) => {
     closeSettingsModal();
   }
 
+  if (event.key === "Escape" && !els.mapContextMenu.hidden) {
+    hideMapContextMenu();
+  }
+
   if (event.key === "Escape" && !els.datasetSelectPopover.hidden) {
     setDatasetSelectOpen(false);
     els.datasetSelectButton.focus();
@@ -2258,6 +2475,10 @@ els.datasetOptions.forEach((option) => {
 });
 
 document.addEventListener("click", (event) => {
+  if (!els.mapContextMenu.hidden && !els.mapContextMenu.contains(event.target)) {
+    hideMapContextMenu();
+  }
+
   if (!els.datasetSelect.contains(event.target)) {
     setDatasetSelectOpen(false);
   }
