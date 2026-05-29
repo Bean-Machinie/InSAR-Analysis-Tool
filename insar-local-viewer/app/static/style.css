@@ -578,6 +578,16 @@ button:active {
   z-index: 1200;
 }
 
+.select-group-label {
+  color: var(--muted);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 7px 8px 3px;
+  text-transform: uppercase;
+}
+
 .select-option {
   align-items: center;
   background: transparent;

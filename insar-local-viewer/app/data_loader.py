@@ -1,4 +1,5 @@
 import json
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -95,6 +96,7 @@ def get_project_info(project_dir: Path) -> dict:
         dates = _date_strings(dataset)
         products = _resolve_products(dataset)
         metadata = _read_project_metadata(resolved_project_dir)
+        ps_points = _read_ps_points(resolved_project_dir, include_points=False)
 
         return {
             "project_path": str(resolved_project_dir),
@@ -105,6 +107,7 @@ def get_project_info(project_dir: Path) -> dict:
                 "deformation": products["deformation"] is not None,
                 "coherence": products["coherence"] is not None,
                 "terrain": products["dem"] is not None,
+                "ps_points": ps_points["available"],
             },
             "lat_count": int(lat.size),
             "lon_count": int(lon.size),
@@ -112,6 +115,11 @@ def get_project_info(project_dir: Path) -> dict:
             "dates": dates,
             "bounds": _bounds(lat, lon),
             "metadata": metadata,
+            "ps_points": {
+                "available": ps_points["available"],
+                "count": ps_points["count"],
+                "geocoded_count": ps_points["geocoded_count"],
+            },
         }
     finally:
         dataset.close()
@@ -125,6 +133,7 @@ def get_map_data(project_dir: Path) -> dict:
         lon = _coord_values(dataset, "lon")
         dates = _date_strings(dataset)
         products = _resolve_products(dataset)
+        ps_points = _read_ps_points(resolved_project_dir)
 
         _require_product(products, "velocity")
         _require_product(products, "deformation")
@@ -199,6 +208,7 @@ def get_map_data(project_dir: Path) -> dict:
                     "unit": "m",
                     "source": products["dem"] or "flat-fallback",
                 },
+                "ps_points": ps_points,
             },
         }
     finally:
@@ -378,7 +388,7 @@ def _bounds(lat, lon):
 
 def _read_project_metadata(project_dir: Path):
     metadata = {}
-    for filename in ["parameters.json", "manifest.json"]:
+    for filename in ["parameters.json", "manifest.json", "sbas_results_metadata.json"]:
         path = project_dir / filename
         if not path.exists():
             continue
@@ -408,6 +418,141 @@ def _array_to_json(values):
     if array.ndim == 3:
         return [[[_finite_float(value) for value in row] for row in plane] for plane in array]
     raise ProjectDataError("Only 2D and 3D arrays can be serialized for map display")
+
+
+def _read_ps_points(project_dir: Path, include_points: bool = True) -> dict:
+    csv_path = project_dir / "ps_points" / "ps_points.csv"
+    timeseries_path = project_dir / "ps_points" / "ps_timeseries_wide.csv"
+    pixel_size_m = _ps_pixel_size_m(project_dir)
+    if not csv_path.exists():
+        return {
+            "available": False,
+            "count": 0,
+            "geocoded_count": 0,
+            "pixel_size_m": pixel_size_m,
+            "pixel_radius_m": pixel_size_m / 2 if pixel_size_m else None,
+            "dates": [],
+            "points": [],
+            "ranges": _ps_empty_ranges(),
+        }
+
+    ps_dates, ps_timeseries = _read_ps_timeseries_wide(timeseries_path) if include_points else ([], {})
+    points = []
+    total = 0
+    metric_values = {key: [] for key in _ps_metric_columns()}
+
+    with csv_path.open(newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            total += 1
+            lon = _optional_float(row.get("lon"))
+            lat = _optional_float(row.get("lat"))
+            if lon is None or lat is None:
+                continue
+
+            point = {
+                "ps_id": _optional_int(row.get("ps_id")),
+                "lon": lon,
+                "lat": lat,
+                "velocity_mm_yr": _optional_float(row.get("velocity_mm_yr")),
+                "displacement_last_mm": _optional_float(row.get("displacement_last_mm")),
+                "displacement_delta_mm": _optional_float(row.get("displacement_delta_mm")),
+                "rmse_mm": _optional_float(row.get("rmse_mm")),
+                "psf": _optional_float(row.get("psf")),
+                "corr_median": _optional_float(row.get("corr_median")),
+                "corr_mean": _optional_float(row.get("corr_mean")),
+                "valid_pair_count": _optional_int(row.get("valid_pair_count")),
+                "first_date": row.get("first_date") or None,
+                "last_date": row.get("last_date") or None,
+            }
+            if include_points:
+                point["timeseries"] = ps_timeseries.get(point["ps_id"], [])
+            for key in metric_values:
+                value = point.get(key)
+                if value is not None:
+                    metric_values[key].append(value)
+            if include_points:
+                points.append(point)
+
+    return {
+        "available": True,
+        "count": total,
+        "geocoded_count": len(points) if include_points else sum(1 for _ in _iter_geocoded_ps_rows(csv_path)),
+        "pixel_size_m": pixel_size_m,
+        "pixel_radius_m": pixel_size_m / 2 if pixel_size_m else None,
+        "dates": ps_dates,
+        "points": points,
+        "ranges": {
+            key: _robust_range(np.asarray(values, dtype=float), center_zero=key in {"velocity_mm_yr", "displacement_last_mm", "displacement_delta_mm"})
+            for key, values in metric_values.items()
+        },
+    }
+
+
+def _ps_pixel_size_m(project_dir: Path):
+    metadata = _read_project_metadata(project_dir)
+    processing = metadata.get("sbas_results_metadata.json", {}).get("processing", {})
+    return _optional_float(processing.get("geocode_resolution_m"))
+
+
+def _read_ps_timeseries_wide(csv_path: Path):
+    if not csv_path.exists():
+        return [], {}
+
+    with csv_path.open(newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        fields = reader.fieldnames or []
+        date_fields = [field for field in fields if field.startswith("d_")]
+        dates = [
+            f"{field[2:6]}-{field[6:8]}-{field[8:10]}"
+            for field in date_fields
+        ]
+        series_by_id = {}
+        for row in reader:
+            ps_id = _optional_int(row.get("ps_id"))
+            if ps_id is None:
+                continue
+            series_by_id[ps_id] = [_optional_float(row.get(field)) for field in date_fields]
+    return dates, series_by_id
+
+
+def _iter_geocoded_ps_rows(csv_path: Path):
+    with csv_path.open(newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if _optional_float(row.get("lon")) is not None and _optional_float(row.get("lat")) is not None:
+                yield row
+
+
+def _ps_metric_columns():
+    return [
+        "velocity_mm_yr",
+        "displacement_last_mm",
+        "displacement_delta_mm",
+        "rmse_mm",
+        "psf",
+        "corr_median",
+        "corr_mean",
+        "valid_pair_count",
+    ]
+
+
+def _ps_empty_ranges():
+    return {key: {"min": None, "max": None, "p02": None, "p98": None} for key in _ps_metric_columns()}
+
+
+def _optional_float(value):
+    if value is None or value == "":
+        return None
+    try:
+        return _finite_float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value):
+    parsed = _optional_float(value)
+    return None if parsed is None else int(parsed)
 
 
 def _robust_range(values, center_zero=False):
