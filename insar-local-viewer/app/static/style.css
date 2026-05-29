@@ -287,6 +287,24 @@ input:focus-visible,
   text-align: center;
 }
 
+.settings-subsection {
+  margin: 0 0 8px;
+}
+
+.settings-subsection:not(:first-of-type) {
+  margin-top: 18px;
+}
+
+.settings-subsection h4 {
+  color: var(--text);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
 .heatmap-options {
   display: grid;
   gap: 10px;
@@ -327,6 +345,49 @@ input:focus-visible,
   color: var(--muted);
   font-family: Inter, "Segoe UI", Arial, sans-serif;
   font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.scale-options {
+  display: grid;
+  gap: 8px;
+}
+
+.scale-option {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  display: grid;
+  gap: 4px;
+  min-height: 54px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.scale-option:hover {
+  border-color: #bbb8aa;
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
+
+.scale-option.active {
+  border-color: rgba(17, 17, 17, 0.52);
+  box-shadow: inset 3px 0 0 rgba(17, 17, 17, 0.84);
+}
+
+.scale-option-label {
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.15;
+}
+
+.scale-option-detail {
+  color: var(--muted);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 0.73rem;
   font-weight: 700;
   line-height: 1.25;
 }

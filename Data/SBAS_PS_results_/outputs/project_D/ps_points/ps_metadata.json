@@ -1,0 +1,34 @@
+{
+  "project": "project",
+  "orbit_direction": "D",
+  "branch": "Real PyGMTSAR PSI using unwrap1d, sparse point export",
+  "separate_from_sbas": true,
+  "full_psi_rasters_cached": true,
+  "full_psi_rasters_exported_as_user_products": false,
+  "sbas_unwrap1d_used": true,
+  "ps_threshold": 0.9,
+  "ps_corr_limit": 0.4,
+  "ps_min_valid_pairs": 6,
+  "ps_max_pairs": 28,
+  "n_pairs": 28,
+  "n_dates": 18,
+  "n_ps_candidates_before_export_limit": 29721,
+  "n_ps_exported": 29721,
+  "date_start": "2018-07-09",
+  "date_end": "2019-01-29",
+  "outputs": {
+    "ps_points_csv": "outputs/project_D/ps_points/ps_points.csv",
+    "ps_timeseries_csv": "outputs/project_D/ps_points/ps_timeseries.csv",
+    "ps_timeseries_wide_csv": "outputs/project_D/ps_points/ps_timeseries_wide.csv",
+    "ps_points_gpkg": "outputs/project_D/ps_points/ps_points.gpkg",
+    "ps_points_geojson": "outputs/project_D/ps_points/ps_points.geojson"
+  },
+  "notes": [
+    "This follows the PyGMTSAR/InSAR.dev PSI example pattern: single-look interferograms, unwrap1d, los_displacement_mm, lstsq, velocity.",
+    "The computation is full-grid internally, as in the Golden Valley example.",
+    "Only PS-selected points are exported as user-facing outputs.",
+    "QGIS should use ps_points.gpkg or ps_points.geojson when geocoding succeeds.",
+    "Time series can be joined by ps_id.",
+    "LOS displacement sign convention follows sbas.los_displacement_mm()."
+  ]
+}

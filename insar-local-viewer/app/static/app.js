@@ -19,9 +19,9 @@ const state = {
   hasFitProjectBounds: false,
   is3D: localStorage.getItem("insar-view-mode") === "3d",
   verticalExaggeration: Number(localStorage.getItem("insar-vertical-exaggeration")) || 1.5,
-  heatmapPalette: localStorage.getItem("insar-heatmap-palette") || "vik",
+  heatmapPalette: localStorage.getItem("insar-heatmap-palette") || "spectral",
   scaleSettings: {
-    mode: "linear",
+    mode: localStorage.getItem("insar-scale-mode") || "linear",
     percentile: 99.9,
     symmetric: true,
     gamma: 1,
@@ -45,6 +45,7 @@ const els = {
   settingsNavButtons: document.querySelectorAll(".settings-nav-button"),
   settingsContents: document.querySelectorAll(".settings-content"),
   heatmapOptions: document.querySelector("#heatmap-options"),
+  colorScaleOptions: document.querySelector("#color-scale-options"),
   datasetProjectLabel: document.querySelector("#dataset-project-label"),
   status: document.querySelector("#status"),
   datasetFile: document.querySelector("#dataset-file"),
@@ -117,29 +118,68 @@ const layerText = {
 
 const HEATMAP_PALETTES = {
   vik: {
-    name: "Vik",
-    detail: "scientific blue, neutral, red",
+    name: "vik",
+    detail: "the geophysics standard (Crameri)",
     colors: [
-      [36, 75, 154],
-      [73, 128, 180],
-      [139, 185, 193],
-      [244, 244, 238],
-      [222, 164, 126],
-      [190, 91, 72],
-      [133, 36, 46],
+      [0, 18, 102],
+      [31, 88, 153],
+      [93, 150, 190],
+      [222, 229, 225],
+      [218, 160, 118],
+      [173, 65, 45],
+      [88, 0, 12],
+    ],
+  },
+  coolwarm: {
+    name: "cool-warm",
+    detail: "smooth, popular sci-viz default (Moreland)",
+    colors: [
+      [59, 76, 192],
+      [102, 139, 240],
+      [172, 196, 255],
+      [221, 221, 221],
+      [244, 166, 143],
+      [211, 80, 78],
+      [180, 4, 38],
     ],
   },
   rdbu: {
     name: "RdBu",
-    detail: "colorblind-safe diverging",
+    detail: "classic ColorBrewer, available everywhere",
     colors: [
-      [49, 54, 149],
-      [69, 117, 180],
-      [171, 217, 233],
+      [5, 48, 97],
+      [33, 102, 172],
+      [146, 197, 222],
       [247, 247, 247],
-      [253, 174, 97],
-      [215, 48, 39],
-      [165, 0, 38],
+      [244, 165, 130],
+      [178, 24, 43],
+      [103, 0, 31],
+    ],
+  },
+  puor: {
+    name: "PuOr",
+    detail: "purple-orange, very strong CVD safety",
+    colors: [
+      [45, 0, 75],
+      [84, 39, 136],
+      [178, 171, 210],
+      [247, 247, 247],
+      [253, 184, 99],
+      [224, 130, 20],
+      [127, 59, 8],
+    ],
+  },
+  brbg: {
+    name: "BrBG",
+    detail: "brown-teal, if you want to avoid red/blue",
+    colors: [
+      [84, 48, 5],
+      [166, 97, 26],
+      [223, 194, 125],
+      [245, 245, 245],
+      [128, 205, 193],
+      [1, 133, 113],
+      [0, 60, 48],
     ],
   },
   spectral: {
@@ -168,18 +208,16 @@ const HEATMAP_PALETTES = {
       [180, 0, 0],
     ],
   },
-  cividis: {
-    name: "Cividis",
-    detail: "blue, slate, olive, yellow",
-    colors: [
-      [0, 32, 76],
-      [24, 64, 105],
-      [57, 92, 116],
-      [94, 117, 111],
-      [133, 143, 93],
-      [177, 171, 64],
-      [253, 231, 37],
-    ],
+};
+
+const COLOR_SCALE_MODES = {
+  linear: {
+    name: "Linear",
+    detail: "Even value spacing across the spectrum",
+  },
+  symlog: {
+    name: "Color-coded on a logarithmic scale",
+    detail: "Compresses large signed values while keeping zero stable",
   },
 };
 
@@ -196,7 +234,11 @@ function activeHeatmapPalette() {
 }
 
 if (!HEATMAP_PALETTES[state.heatmapPalette]) {
-  state.heatmapPalette = "vik";
+  state.heatmapPalette = "spectral";
+}
+
+if (!COLOR_SCALE_MODES[state.scaleSettings.mode]) {
+  state.scaleSettings.mode = "linear";
 }
 
 const THREE_VIEW_CONFIG = {
@@ -2146,8 +2188,9 @@ function updateLegend() {
 
   const unit = state.activeLayer === "velocity" ? "mm/year" : "mm";
   els.legendTitle.textContent = state.activeLayer === "velocity" ? `Velocity (${unit})` : `Displacement (${unit})`;
+  const scaleName = COLOR_SCALE_MODES[renderRange.scale?.mode]?.name?.toLowerCase() ?? "linear";
   const noiseLabel = renderRange.scale
-    ? `linear scale - stable +/-${formatLegendNumber(renderRange.scale.linthresh)} ${unit}`
+    ? `${scaleName} - stable +/-${formatLegendNumber(renderRange.scale.linthresh)} ${unit}`
     : "linear scale";
   els.legendSubtitle.textContent = state.activeLayer === "deformation"
     ? `${getDeformationLegendDates()} - ${noiseLabel}`
@@ -2617,6 +2660,7 @@ function renderHeatmapOptions() {
   });
 
   els.heatmapOptions.replaceChildren(...options);
+  renderColorScaleOptions();
 }
 
 function selectHeatmapPalette(paletteKey) {
@@ -2624,6 +2668,39 @@ function selectHeatmapPalette(paletteKey) {
   state.heatmapPalette = paletteKey;
   localStorage.setItem("insar-heatmap-palette", paletteKey);
   renderHeatmapOptions();
+  drawMap();
+}
+
+function renderColorScaleOptions() {
+  if (!els.colorScaleOptions) return;
+  const options = Object.entries(COLOR_SCALE_MODES).map(([key, mode]) => {
+    const button = document.createElement("button");
+    button.className = "scale-option";
+    button.type = "button";
+    button.dataset.scaleMode = key;
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", String(key === state.scaleSettings.mode));
+    button.classList.toggle("active", key === state.scaleSettings.mode);
+
+    const label = document.createElement("span");
+    label.className = "scale-option-label";
+    label.textContent = mode.name;
+
+    const detail = document.createElement("span");
+    detail.className = "scale-option-detail";
+    detail.textContent = mode.detail;
+
+    button.append(label, detail);
+    return button;
+  });
+  els.colorScaleOptions.replaceChildren(...options);
+}
+
+function selectColorScaleMode(mode) {
+  if (!COLOR_SCALE_MODES[mode]) return;
+  state.scaleSettings.mode = mode;
+  localStorage.setItem("insar-scale-mode", mode);
+  renderColorScaleOptions();
   drawMap();
 }
 
@@ -2776,6 +2853,12 @@ els.heatmapOptions.addEventListener("click", (event) => {
   const option = event.target.closest(".heatmap-option");
   if (!option) return;
   selectHeatmapPalette(option.dataset.palette);
+});
+
+els.colorScaleOptions?.addEventListener("click", (event) => {
+  const option = event.target.closest(".scale-option");
+  if (!option) return;
+  selectColorScaleMode(option.dataset.scaleMode);
 });
 
 els.datasetSelectButton.addEventListener("click", () => {

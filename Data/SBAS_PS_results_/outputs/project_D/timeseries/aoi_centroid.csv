@@ -1,0 +1,35 @@
+# POI: aoi_centroid
+# Location: lon=-44.120682, lat=-20.121149 (EPSG:4326)
+# Radar coords: x=19900.6, y=1759.2
+# Project: project  |  Orbit: D  |  PyGMTSAR 2025.4.8.post1
+# Coherence threshold: 0.3 (median)
+# Date-attributed coherence source: pairwise_coherence_attributed_to_date
+# Columns:
+#   date: acquisition date, YYYY-MM-DD
+#   sbas_raw_mm: raw cumulative LOS displacement in mm
+#   sbas_masked_mm: raw displacement masked by valid_time_mask
+#   coherence_at_date: approximate date-attributed pairwise coherence
+#   valid_time_mask: 1=valid, 0=invalid
+# Reference: sbas_raw_mm and sbas_masked_mm use the PyGMTSAR SBAS reference convention.
+# Note: coherence_at_date is derived from pairwise interferogram coherence. It is not a direct single-date coherence measurement.
+# Segmentation: disabled; no segmented displacement or segment_id columns are exported.
+# Generated: 2026-05-29 12:03:44 UTC
+date,sbas_raw_mm,sbas_masked_mm,coherence_at_date,valid_time_mask
+2018-07-09,-0.0000,-0.0000,0.5078,1
+2018-07-21,-0.0681,-0.0681,0.5474,1
+2018-08-02,-0.1875,-0.1875,0.5901,1
+2018-08-14,-0.0500,-0.0500,0.6385,1
+2018-08-26,0.3178,0.3178,0.5283,1
+2018-09-07,0.4433,0.4433,0.5331,1
+2018-09-19,0.9566,0.9566,0.4460,1
+2018-10-01,1.2233,1.2233,0.3702,1
+2018-10-13,1.7361,,0.2213,0
+2018-10-25,3.6997,,0.2110,0
+2018-11-06,2.2576,,0.2482,0
+2018-11-18,1.2595,,0.2241,0
+2018-11-30,0.9991,,0.2119,0
+2018-12-12,-1.6669,,0.2232,0
+2018-12-24,-2.4596,-2.4596,0.3298,1
+2019-01-05,-4.8824,,0.2115,0
+2019-01-17,-4.6680,,0.0961,0
+2019-01-29,-17.0208,,0.0522,0
