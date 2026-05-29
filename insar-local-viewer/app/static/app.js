@@ -21,7 +21,7 @@ const state = {
   verticalExaggeration: Number(localStorage.getItem("insar-vertical-exaggeration")) || 1.5,
   heatmapPalette: localStorage.getItem("insar-heatmap-palette") || "vik",
   scaleSettings: {
-    mode: "symlog",
+    mode: "linear",
     percentile: 99.9,
     symmetric: true,
     gamma: 1,
@@ -2146,7 +2146,9 @@ function updateLegend() {
 
   const unit = state.activeLayer === "velocity" ? "mm/year" : "mm";
   els.legendTitle.textContent = state.activeLayer === "velocity" ? `Velocity (${unit})` : `Displacement (${unit})`;
-  const noiseLabel = renderRange.scale ? `noise floor ${formatLegendNumber(renderRange.scale.linthresh)} ${unit}` : "symlog scale";
+  const noiseLabel = renderRange.scale
+    ? `linear scale - stable +/-${formatLegendNumber(renderRange.scale.linthresh)} ${unit}`
+    : "linear scale";
   els.legendSubtitle.textContent = state.activeLayer === "deformation"
     ? `${getDeformationLegendDates()} - ${noiseLabel}`
     : `line of sight rate - ${noiseLabel}`;
