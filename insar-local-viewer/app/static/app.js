@@ -283,13 +283,13 @@ function getDisplayRange(layer = state.activeLayer, values = getLayerValues(laye
   }
 
   visibleValues.sort((a, b) => a - b);
-  const p02 = percentile(visibleValues, 2);
-  const p98 = percentile(visibleValues, 98);
-  const extent = Math.max(Math.abs(p02), Math.abs(p98), 0.000001);
+  const dataMin = visibleValues[0];
+  const dataMax = visibleValues[visibleValues.length - 1];
+  const extent = Math.max(Math.abs(dataMin), Math.abs(dataMax), 0.000001);
 
   return {
-    min: visibleValues[0],
-    max: visibleValues[visibleValues.length - 1],
+    min: -extent,
+    max: extent,
     p02: -extent,
     p98: extent,
     zeroHalfWidth: zeroBandHalfWidth(layer, -extent, extent),
@@ -421,11 +421,10 @@ function colorForValue(value, range, layer) {
     return [...color, 255];
   }
 
-  const min = range.p02 ?? range.min ?? -1;
-  const max = range.p98 ?? range.max ?? 1;
-  const extent = Math.max(Math.abs(min), Math.abs(max), 0.000001);
-  const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, -extent, extent);
-  const color = colorForDivergingValue(value, extent, neutral);
+  const min = range.min ?? range.p02 ?? -1;
+  const max = range.max ?? range.p98 ?? 1;
+  const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, min, max);
+  const color = colorForDivergingRangeValue(value, min, max, neutral);
   return [...color, 255];
 }
 
@@ -435,6 +434,10 @@ function colorFromPalette(t, palette) {
 }
 
 function colorForDivergingValue(value, extent, neutralHalfWidth) {
+  return colorForDivergingRangeValue(value, -extent, extent, neutralHalfWidth);
+}
+
+function colorForDivergingRangeValue(value, min, max, neutralHalfWidth) {
   const palette = activeHeatmapPalette().colors;
   const last = palette.length - 1;
   const negativeExtreme = palette[0];
@@ -442,17 +445,19 @@ function colorForDivergingValue(value, extent, neutralHalfWidth) {
   const negativeNear = blendColors(palette[Math.min(2, last)], neutralColor, 0.6);
   const positiveExtreme = palette[last];
   const positiveNear = blendColors(palette[Math.max(0, last - 2)], neutralColor, 0.6);
+  const negativeLimit = Math.min(min, -0.000001);
+  const positiveLimit = Math.max(max, 0.000001);
 
   if (Math.abs(value) <= neutralHalfWidth) {
     return neutralColor;
   }
 
   if (value < -neutralHalfWidth) {
-    const t = clamp((-value - neutralHalfWidth) / Math.max(0.000001, extent - neutralHalfWidth), 0, 1);
+    const t = clamp((-value - neutralHalfWidth) / Math.max(0.000001, Math.abs(negativeLimit) - neutralHalfWidth), 0, 1);
     return interpolateColor(negativeNear, negativeExtreme, Math.pow(t, 1.65));
   }
   if (value > neutralHalfWidth) {
-    const t = clamp((value - neutralHalfWidth) / Math.max(0.000001, extent - neutralHalfWidth), 0, 1);
+    const t = clamp((value - neutralHalfWidth) / Math.max(0.000001, positiveLimit - neutralHalfWidth), 0, 1);
     return interpolateColor(positiveNear, positiveExtreme, Math.pow(t, 1.65));
   }
 
@@ -521,7 +526,7 @@ function initializeMap() {
   state.map.createPane("selectedPixelPane");
   state.map.getPane("selectedPixelPane").style.zIndex = 720;
 
-  L.control.layers(baseLayers, {}, { collapsed: false }).addTo(state.map);
+  L.control.layers(baseLayers, {}, { collapsed: false, position: "bottomright" }).addTo(state.map);
   L.control.scale().addTo(state.map);
   state.map.setView([0, 0], 2);
   state.map.on("click", handleLeafletMapClick);
@@ -1937,40 +1942,50 @@ function buildLegendBins(min, max, count) {
 
 function renderLegendRows(bins, unit, layer, renderRange) {
   const selectedValue = getSelectedLegendValue();
-  const rows = bins.map((bin, index) => {
-    const row = document.createElement("div");
-    row.className = "map-legend-row";
+  const wrap = document.createElement("div");
+  wrap.className = "map-legend-segmented";
+
+  const segments = document.createElement("div");
+  segments.className = "map-legend-segments";
+  bins.forEach((bin, index) => {
+    const segment = document.createElement("span");
+    segment.className = "map-legend-segment";
     if (selectedValue !== null && valueInLegendBin(selectedValue, bin, index, bins.length)) {
-      row.classList.add("is-active");
+      segment.classList.add("is-active");
     }
-
-    const swatch = document.createElement("span");
-    swatch.className = "map-legend-swatch";
-    swatch.style.backgroundColor = rgbCss(bin.color || colorForValue((bin.low + bin.high) / 2, renderRange, layer));
-
-    const label = document.createElement("span");
-    label.className = "map-legend-label";
-    label.textContent = `${formatLegendNumber(bin.low)} - ${formatLegendNumber(bin.high)}`;
-    label.title = unit;
-
-    row.append(swatch, label);
-    return row;
+    segment.style.backgroundColor = rgbCss(bin.color || colorForValue((bin.low + bin.high) / 2, renderRange, layer));
+    segment.title = `${formatLegendNumber(bin.low)} - ${formatLegendNumber(bin.high)} ${unit}`;
+    segments.appendChild(segment);
   });
 
-  els.legendItems.replaceChildren(...rows);
+  const ticks = document.createElement("div");
+  ticks.className = "map-legend-ticks";
+  [bins[0]?.low ?? 0, 0.5, bins.at(-1)?.high ?? 1].forEach((value) => {
+    const tick = document.createElement("span");
+    tick.textContent = formatLegendNumber(value);
+    tick.title = unit;
+    ticks.appendChild(tick);
+  });
+
+  const marker = renderLegendMarker(selectedValue, bins[0]?.low ?? 0, bins.at(-1)?.high ?? 1, unit);
+  wrap.append(segments, ticks);
+  if (marker) wrap.appendChild(marker);
+  els.legendItems.replaceChildren(wrap);
 }
 
 function renderContinuousLegend(range, unit, layer) {
-  const extent = Math.max(Math.abs(range.p02 ?? 0), Math.abs(range.p98 ?? 0), 0.000001);
-  const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, -extent, extent);
-  const values = [extent, 0, -extent];
+  const min = range.min ?? range.p02 ?? 0;
+  const max = range.max ?? range.p98 ?? 0;
+  const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, min, max);
+  const midpoint = min < 0 && max > 0 ? 0 : min + (max - min) / 2;
+  const values = [min, midpoint, max];
 
   const wrap = document.createElement("div");
   wrap.className = "map-legend-continuous";
 
   const gradient = document.createElement("div");
   gradient.className = "map-legend-gradient";
-  gradient.style.background = continuousLegendGradient(extent, neutral);
+  gradient.style.background = continuousLegendGradient(min, max, neutral);
 
   const ticks = document.createElement("div");
   ticks.className = "map-legend-ticks";
@@ -1981,19 +1996,31 @@ function renderContinuousLegend(range, unit, layer) {
     ticks.appendChild(tick);
   });
 
+  const marker = renderLegendMarker(getSelectedLegendValue(), min, max, unit);
   wrap.append(gradient, ticks);
+  if (marker) wrap.appendChild(marker);
   els.legendItems.replaceChildren(wrap);
 }
 
-function continuousLegendGradient(extent, neutralHalfWidth) {
+function continuousLegendGradient(min, max, neutralHalfWidth) {
   const stops = [];
   const sampleCount = 24;
   for (let index = 0; index <= sampleCount; index += 1) {
     const percent = (index / sampleCount) * 100;
-    const value = extent - (2 * extent * index) / sampleCount;
-    stops.push(`${rgbCss(colorForDivergingValue(value, extent, neutralHalfWidth))} ${percent}%`);
+    const value = min + ((max - min) * index) / sampleCount;
+    stops.push(`${rgbCss(colorForDivergingRangeValue(value, min, max, neutralHalfWidth))} ${percent}%`);
   }
-  return `linear-gradient(180deg, ${stops.join(", ")})`;
+  return `linear-gradient(90deg, ${stops.join(", ")})`;
+}
+
+function renderLegendMarker(value, min, max, unit) {
+  if (value === null || value === undefined || Number.isNaN(value) || max <= min) return null;
+  const marker = document.createElement("span");
+  marker.className = "map-legend-marker";
+  const percent = clamp(((value - min) / (max - min)) * 100, 0, 100);
+  marker.style.left = `${percent}%`;
+  marker.title = `Selected pixel: ${formatLegendNumber(value)} ${unit}`;
+  return marker;
 }
 
 function renderLegendMessage(message) {
