@@ -19,7 +19,14 @@ const state = {
   hasFitProjectBounds: false,
   is3D: localStorage.getItem("insar-view-mode") === "3d",
   verticalExaggeration: Number(localStorage.getItem("insar-vertical-exaggeration")) || 1.5,
-  heatmapPalette: localStorage.getItem("insar-heatmap-palette") || "spectral",
+  heatmapPalette: localStorage.getItem("insar-heatmap-palette") || "vik",
+  scaleSettings: {
+    mode: "symlog",
+    percentile: 99.9,
+    symmetric: true,
+    gamma: 1,
+    noiseMultiplier: 2,
+  },
   scene3D: null,
   is3DAnimating: false,
   threePromise: null,
@@ -109,6 +116,32 @@ const layerText = {
 };
 
 const HEATMAP_PALETTES = {
+  vik: {
+    name: "Vik",
+    detail: "scientific blue, neutral, red",
+    colors: [
+      [36, 75, 154],
+      [73, 128, 180],
+      [139, 185, 193],
+      [244, 244, 238],
+      [222, 164, 126],
+      [190, 91, 72],
+      [133, 36, 46],
+    ],
+  },
+  rdbu: {
+    name: "RdBu",
+    detail: "colorblind-safe diverging",
+    colors: [
+      [49, 54, 149],
+      [69, 117, 180],
+      [171, 217, 233],
+      [247, 247, 247],
+      [253, 174, 97],
+      [215, 48, 39],
+      [165, 0, 38],
+    ],
+  },
   spectral: {
     name: "Spectral",
     detail: "red, amber, green, cyan, blue",
@@ -163,7 +196,7 @@ function activeHeatmapPalette() {
 }
 
 if (!HEATMAP_PALETTES[state.heatmapPalette]) {
-  state.heatmapPalette = "spectral";
+  state.heatmapPalette = "vik";
 }
 
 const THREE_VIEW_CONFIG = {
@@ -282,18 +315,82 @@ function getDisplayRange(layer = state.activeLayer, values = getLayerValues(laye
     return { min: null, max: null, p02: null, p98: null };
   }
 
-  visibleValues.sort((a, b) => a - b);
-  const dataMin = visibleValues[0];
-  const dataMax = visibleValues[visibleValues.length - 1];
-  const extent = Math.max(Math.abs(dataMin), Math.abs(dataMax), 0.000001);
+  const robust = computeRobustExtent(visibleValues, {
+    percentile: state.scaleSettings.percentile,
+    symmetric: state.scaleSettings.symmetric,
+  });
+  const linthresh = estimateNoiseFloor(layer, robust.extent);
+  const scale = {
+    mode: state.scaleSettings.mode,
+    negExtent: robust.negExtent,
+    posExtent: robust.posExtent,
+    rawNegExtent: robust.rawNegExtent,
+    rawPosExtent: robust.rawPosExtent,
+    linthresh,
+    gamma: state.scaleSettings.gamma,
+    percentile: state.scaleSettings.percentile,
+    symmetric: state.scaleSettings.symmetric,
+    locked: false,
+  };
 
   return {
-    min: -extent,
-    max: extent,
-    p02: -extent,
-    p98: extent,
-    zeroHalfWidth: zeroBandHalfWidth(layer, -extent, extent),
+    min: -scale.negExtent,
+    max: scale.posExtent,
+    p02: -scale.negExtent,
+    p98: scale.posExtent,
+    zeroHalfWidth: linthresh,
+    scale,
   };
+}
+
+function computeRobustExtent(values, { percentile = 99.9, symmetric = true } = {}) {
+  const magnitudes = [];
+  let rawNegExtent = 0;
+  let rawPosExtent = 0;
+
+  values.forEach((value) => {
+    if (value === null || value === undefined || Number.isNaN(value)) return;
+    if (value < 0) rawNegExtent = Math.max(rawNegExtent, Math.abs(value));
+    if (value > 0) rawPosExtent = Math.max(rawPosExtent, value);
+    magnitudes.push(Math.abs(value));
+  });
+
+  if (!magnitudes.length) {
+    return { negExtent: 0.000001, posExtent: 0.000001, rawNegExtent: 0, rawPosExtent: 0, extent: 0.000001 };
+  }
+
+  magnitudes.sort((a, b) => a - b);
+  const robustMagnitude = Math.max(quantileSorted(magnitudes, percentile / 100), 0.000001);
+  const rawMagnitude = Math.max(rawNegExtent, rawPosExtent, 0.000001);
+  const extent = Math.min(robustMagnitude, rawMagnitude);
+
+  if (symmetric) {
+    return {
+      negExtent: extent,
+      posExtent: extent,
+      rawNegExtent,
+      rawPosExtent,
+      extent,
+    };
+  }
+
+  return {
+    negExtent: Math.min(Math.max(rawNegExtent, 0.000001), extent),
+    posExtent: Math.min(Math.max(rawPosExtent, 0.000001), extent),
+    rawNegExtent,
+    rawPosExtent,
+    extent,
+  };
+}
+
+function quantileSorted(sortedValues, q) {
+  if (!sortedValues.length) return null;
+  const index = clamp(q, 0, 1) * (sortedValues.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sortedValues[lower];
+  const weight = index - lower;
+  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
 }
 
 function getVisibleValues(layer = state.activeLayer, values = getLayerValues(layer)) {
@@ -324,16 +421,6 @@ function getScaleValues(layer = state.activeLayer, values = getLayerValues(layer
   return values;
 }
 
-function percentile(sortedValues, percentileValue) {
-  if (!sortedValues.length) return null;
-  const index = (percentileValue / 100) * (sortedValues.length - 1);
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  if (lower === upper) return sortedValues[lower];
-  const weight = index - lower;
-  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
-}
-
 function zeroBandHalfWidth(layer, min, max) {
   const extent = Math.max(Math.abs(min), Math.abs(max), 0.000001);
   if (layer === "deformation") {
@@ -342,13 +429,82 @@ function zeroBandHalfWidth(layer, min, max) {
   return Math.min(14, Math.max(5, extent * 0.095));
 }
 
-function blendColors(color, towardColor, amount) {
-  const t = clamp(amount, 0, 1);
-  return [
-    Math.round(color[0] + (towardColor[0] - color[0]) * t),
-    Math.round(color[1] + (towardColor[1] - color[1]) * t),
-    Math.round(color[2] + (towardColor[2] - color[2]) * t),
-  ];
+function estimateNoiseFloor(layer, extent) {
+  if (layer === "deformation") {
+    const estimated = estimateDeformationNoiseFloor();
+    if (estimated !== null) return clamp(estimated, 0.5, Math.max(0.5, extent * 0.5));
+    return Math.min(5, Math.max(3, extent * 0.04));
+  }
+  return Math.min(14, Math.max(1, extent * 0.05));
+}
+
+function estimateDeformationNoiseFloor({ sampleSize = 8000, minEpochs = 8 } = {}) {
+  const stack = state.data?.layers.deformation.values;
+  if (!stack || stack.length < minEpochs) return null;
+  const rows = stack[0]?.length ?? 0;
+  const cols = stack[0]?.[0]?.length ?? 0;
+  if (!rows || !cols) return null;
+
+  const total = rows * cols;
+  const step = Math.max(1, Math.floor(total / sampleSize));
+  const perPoint = [];
+
+  for (let linearIndex = 0; linearIndex < total; linearIndex += step) {
+    const row = Math.floor(linearIndex / cols);
+    const col = linearIndex % cols;
+    if (!pixelPassesFilter(row, col)) continue;
+
+    const series = [];
+    for (let epoch = 0; epoch < stack.length; epoch += 1) {
+      const value = stack[epoch]?.[row]?.[col];
+      if (value !== null && value !== undefined && !Number.isNaN(value)) {
+        series.push({ x: epoch, y: value });
+      }
+    }
+    if (series.length < minEpochs) continue;
+
+    const fit = fitLinearTrend(series);
+    const residuals = series.map((point) => point.y - (fit.intercept + fit.slope * point.x));
+    const sigma = nmad(residuals);
+    if (sigma !== null && sigma > 0) perPoint.push(sigma);
+  }
+
+  const sigma = median(perPoint);
+  return sigma === null ? null : state.scaleSettings.noiseMultiplier * sigma;
+}
+
+function fitLinearTrend(points) {
+  let sumX = 0;
+  let sumY = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  points.forEach((point) => {
+    sumX += point.x;
+    sumY += point.y;
+    sumXX += point.x * point.x;
+    sumXY += point.x * point.y;
+  });
+  const n = points.length;
+  const denominator = n * sumXX - sumX * sumX;
+  if (Math.abs(denominator) < 0.000001) {
+    return { slope: 0, intercept: sumY / n };
+  }
+  const slope = (n * sumXY - sumX * sumY) / denominator;
+  return { slope, intercept: (sumY - slope * sumX) / n };
+}
+
+function nmad(values) {
+  const center = median(values);
+  if (center === null) return null;
+  const deviations = values.map((value) => Math.abs(value - center));
+  const mad = median(deviations);
+  return mad === null ? null : 1.4826 * mad;
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return quantileSorted(sorted, 0.5);
 }
 
 function isFilterableLayer(layer = state.activeLayer) {
@@ -413,19 +569,30 @@ function visiblePixelSummary(values = getLayerValues()) {
 }
 
 function colorForValue(value, range, layer) {
-  if (value === null || value === undefined || Number.isNaN(value)) return [0, 0, 0, 0];
+  return colorInfoForValue(value, range, layer).color;
+}
+
+function colorInfoForValue(value, range, layer) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return { color: [0, 0, 0, 0], t: 0, isOver: false, isUnder: false };
+  }
 
   if (layer === "coherence") {
     const t = clamp(value, 0, 1);
     const color = colorFromPalette(t, COHERENCE_LEGEND_COLORS);
-    return [...color, 255];
+    return { color: [...color, 255], t, isOver: false, isUnder: false };
   }
 
-  const min = range.min ?? range.p02 ?? -1;
-  const max = range.max ?? range.p98 ?? 1;
-  const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, min, max);
-  const color = colorForDivergingRangeValue(value, min, max, neutral);
-  return [...color, 255];
+  const scale = range.scale ?? {
+    mode: "symlog",
+    negExtent: Math.abs(range.min ?? range.p02 ?? -1),
+    posExtent: Math.abs(range.max ?? range.p98 ?? 1),
+    linthresh: range.zeroHalfWidth ?? 1,
+    gamma: 1,
+  };
+  const normalized = normalizeDivergingValue(value, scale);
+  const color = colorForNormalizedValue(normalized.t);
+  return { color: [...color, 255], ...normalized };
 }
 
 function colorFromPalette(t, palette) {
@@ -438,30 +605,61 @@ function colorForDivergingValue(value, extent, neutralHalfWidth) {
 }
 
 function colorForDivergingRangeValue(value, min, max, neutralHalfWidth) {
-  const palette = activeHeatmapPalette().colors;
-  const last = palette.length - 1;
-  const negativeExtreme = palette[0];
-  const neutralColor = colorFromPalette(0.5, palette);
-  const negativeNear = blendColors(palette[Math.min(2, last)], neutralColor, 0.6);
-  const positiveExtreme = palette[last];
-  const positiveNear = blendColors(palette[Math.max(0, last - 2)], neutralColor, 0.6);
-  const negativeLimit = Math.min(min, -0.000001);
-  const positiveLimit = Math.max(max, 0.000001);
+  const normalized = normalizeDivergingValue(value, {
+    mode: "symlog",
+    negExtent: Math.abs(min),
+    posExtent: Math.abs(max),
+    linthresh: neutralHalfWidth,
+    gamma: 1,
+  });
+  return colorForNormalizedValue(normalized.t);
+}
 
-  if (Math.abs(value) <= neutralHalfWidth) {
-    return neutralColor;
-  }
+function normalizeDivergingValue(value, scale) {
+  const negExtent = Math.max(scale.negExtent ?? 1, 0.000001);
+  const posExtent = Math.max(scale.posExtent ?? 1, 0.000001);
+  const linthresh = clamp(scale.linthresh ?? 0, 0, Math.max(negExtent, posExtent));
+  const magnitude = Math.abs(value);
+  const extent = value < 0 ? negExtent : posExtent;
+  const sign = value < 0 ? -1 : 1;
+  const isUnder = value < -negExtent;
+  const isOver = value > posExtent;
+  const normalizedMagnitude = normalizeMagnitude(magnitude, extent, linthresh, scale);
 
-  if (value < -neutralHalfWidth) {
-    const t = clamp((-value - neutralHalfWidth) / Math.max(0.000001, Math.abs(negativeLimit) - neutralHalfWidth), 0, 1);
-    return interpolateColor(negativeNear, negativeExtreme, Math.pow(t, 1.65));
-  }
-  if (value > neutralHalfWidth) {
-    const t = clamp((value - neutralHalfWidth) / Math.max(0.000001, positiveLimit - neutralHalfWidth), 0, 1);
-    return interpolateColor(positiveNear, positiveExtreme, Math.pow(t, 1.65));
-  }
+  return {
+    t: sign * normalizedMagnitude,
+    isOver,
+    isUnder,
+  };
+}
 
-  return neutralColor;
+function normalizeMagnitude(magnitude, extent, linthresh, scale) {
+  if (magnitude <= linthresh) return 0;
+  const usableExtent = Math.max(extent - linthresh, 0.000001);
+  const shifted = Math.max(magnitude - linthresh, 0);
+  const raw = (() => {
+    if (scale.mode === "linear") return shifted / usableExtent;
+    if (scale.mode === "power") {
+      const gamma = Math.max(scale.gamma ?? 1, 0.000001);
+      return Math.pow(shifted / usableExtent, gamma);
+    }
+    const base = Math.max(linthresh, usableExtent * 0.02, 0.000001);
+    return Math.log1p(shifted / base) / Math.log1p(usableExtent / base);
+  })();
+  return clamp(raw, 0, 1);
+}
+
+function colorForNormalizedValue(t) {
+  return interpolatePalette(activeHeatmapPalette().colors, (clamp(t, -1, 1) + 1) / 2);
+}
+
+function interpolatePalette(palette, position) {
+  if (palette.length === 1) return palette[0];
+  const scaled = clamp(position, 0, 1) * (palette.length - 1);
+  const low = Math.floor(scaled);
+  const high = Math.ceil(scaled);
+  if (low === high) return palette[low];
+  return interpolateColor(palette[low], palette[high], scaled - low);
 }
 
 function interpolateColor(start, end, t) {
@@ -675,14 +873,32 @@ function drawRasterTile(ctx, coords, tileSize) {
       const radius = Math.max(1, Math.min(width, height) * 0.48);
       const centerX = x + width / 2;
       const centerY = y + height / 2;
-      const color = colorForValue(value, state.rasterRange, state.activeLayer);
+      const colorInfo = colorInfoForValue(value, state.rasterRange, state.activeLayer);
+      const color = colorInfo.color;
 
       ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
       ctx.beginPath();
       ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
       ctx.fill();
+      drawOffscaleRing(ctx, centerX, centerY, radius, colorInfo);
     }
   }
+}
+
+function drawOffscaleRing(ctx, centerX, centerY, radius, colorInfo) {
+  if (!colorInfo?.isOver && !colorInfo?.isUnder) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius + 1.2, 0, Math.PI * 2);
+  ctx.strokeStyle = colorInfo.isOver ? "rgba(20, 20, 20, 0.86)" : "rgba(255, 255, 255, 0.92)";
+  ctx.lineWidth = Math.max(1.25, radius * 0.16);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius + 2.8, 0, Math.PI * 2);
+  ctx.strokeStyle = colorInfo.isOver ? "rgba(255, 255, 255, 0.82)" : "rgba(20, 20, 20, 0.82)";
+  ctx.lineWidth = Math.max(0.75, radius * 0.08);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function axisEdges(values) {
@@ -913,7 +1129,7 @@ async function drawVisibleMapTilesForExport(ctx, scale) {
 function drawRasterForExport(ctx, scale) {
   if (!state.data || !state.activeLayer || !state.rasterValues || !state.rasterRange) return;
   if (state.rasterRange.p02 === null && state.activeLayer !== "coherence") return;
-  drawPixelGridForExport(ctx, scale, state.rasterValues, ({ value }) => colorForValue(value, state.rasterRange, state.activeLayer));
+  drawPixelGridForExport(ctx, scale, state.rasterValues, ({ value }) => colorInfoForValue(value, state.rasterRange, state.activeLayer));
 }
 
 function drawSelectedPixelForExport(ctx, scale) {
@@ -962,11 +1178,15 @@ function drawPixelGridForExport(ctx, scale, values, colorResolver, options = {})
         return;
       }
 
-      const color = colorResolver({ value, row, col });
+      const resolvedColor = colorResolver({ value, row, col });
+      const color = Array.isArray(resolvedColor) ? resolvedColor : resolvedColor.color;
       ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
       ctx.beginPath();
       ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
       ctx.fill();
+      if (!Array.isArray(resolvedColor)) {
+        drawOffscaleRing(ctx, centerX, centerY, radius, resolvedColor);
+      }
     });
   });
 }
@@ -1386,18 +1606,21 @@ function update3DPoints() {
   const values = state.rasterValues;
   const offsets = [];
   const colors = [];
+  const offscaleFlags = [];
   const radius = current3DPointRadius();
   for (let row = 0; row < values.length; row += 1) {
     for (let col = 0; col < values[row].length; col += 1) {
       const value = values[row][col];
       const hiddenByFilter = isFilterableLayer() && !pixelPassesFilter(row, col);
       if (hiddenByFilter || value === null || Number.isNaN(value)) continue;
-      const color = colorForValue(value, state.rasterRange, state.activeLayer);
+      const colorInfo = colorInfoForValue(value, state.rasterRange, state.activeLayer);
+      const color = colorInfo.color;
       view.pixelLookup.push({ row, col });
       view.pixelInstances.push({ row, col });
       const position = worldPosition(row, col, THREE_VIEW_CONFIG.verticalOffsetMeters + radius);
       offsets.push(position.x, position.y, position.z);
       colors.push(color[0] / 255, color[1] / 255, color[2] / 255);
+      offscaleFlags.push(colorInfo.isUnder ? -1 : colorInfo.isOver ? 1 : 0);
     }
   }
 
@@ -1411,6 +1634,7 @@ function update3DPoints() {
   geometry.setAttribute("instanceOffset", new THREE.InstancedBufferAttribute(new Float32Array(offsets), 3));
   geometry.setAttribute("instanceColor", new THREE.InstancedBufferAttribute(new Float32Array(view.pixelBaseColors), 3));
   geometry.setAttribute("instanceRadius", new THREE.InstancedBufferAttribute(radii, 1));
+  geometry.setAttribute("instanceOffscale", new THREE.InstancedBufferAttribute(new Float32Array(offscaleFlags), 1));
   geometry.instanceCount = view.pixelInstances.length;
 
   const material = new THREE.ShaderMaterial({
@@ -1418,12 +1642,15 @@ function update3DPoints() {
       attribute vec3 instanceOffset;
       attribute vec3 instanceColor;
       attribute float instanceRadius;
+      attribute float instanceOffscale;
       varying vec3 vColor;
       varying vec3 vNormal;
+      varying float vOffscale;
 
       void main() {
         vColor = instanceColor;
         vNormal = normalize(normalMatrix * normal);
+        vOffscale = instanceOffscale;
         vec3 spherePosition = position * instanceRadius + instanceOffset;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(spherePosition, 1.0);
       }
@@ -1431,10 +1658,14 @@ function update3DPoints() {
     fragmentShader: `
       varying vec3 vColor;
       varying vec3 vNormal;
+      varying float vOffscale;
 
       void main() {
         float shade = 0.72 + 0.28 * max(dot(normalize(vNormal), normalize(vec3(0.35, 0.65, 0.7))), 0.0);
-        gl_FragColor = vec4(vColor * shade, 1.0);
+        float rim = 1.0 - abs(normalize(vNormal).z);
+        vec3 rimColor = vOffscale > 0.0 ? vec3(0.05, 0.05, 0.05) : vec3(1.0, 1.0, 1.0);
+        vec3 color = abs(vOffscale) > 0.5 && rim > 0.48 ? mix(vColor * shade, rimColor, 0.72) : vColor * shade;
+        gl_FragColor = vec4(color, 1.0);
       }
     `,
     depthTest: true,
@@ -1915,7 +2146,10 @@ function updateLegend() {
 
   const unit = state.activeLayer === "velocity" ? "mm/year" : "mm";
   els.legendTitle.textContent = state.activeLayer === "velocity" ? `Velocity (${unit})` : `Displacement (${unit})`;
-  els.legendSubtitle.textContent = state.activeLayer === "deformation" ? `${getDeformationLegendDates()} scale` : "line of sight rate";
+  const noiseLabel = renderRange.scale ? `noise floor ${formatLegendNumber(renderRange.scale.linthresh)} ${unit}` : "symlog scale";
+  els.legendSubtitle.textContent = state.activeLayer === "deformation"
+    ? `${getDeformationLegendDates()} - ${noiseLabel}`
+    : `line of sight rate - ${noiseLabel}`;
 
   if (renderRange.p02 === null || renderRange.p98 === null) {
     renderLegendMessage("No visible pixels");
@@ -1974,43 +2208,84 @@ function renderLegendRows(bins, unit, layer, renderRange) {
 }
 
 function renderContinuousLegend(range, unit, layer) {
-  const min = range.min ?? range.p02 ?? 0;
-  const max = range.max ?? range.p98 ?? 0;
-  const neutral = range.zeroHalfWidth ?? zeroBandHalfWidth(layer, min, max);
-  const midpoint = min < 0 && max > 0 ? 0 : min + (max - min) / 2;
-  const values = [min, midpoint, max];
+  const scale = range.scale ?? {
+    mode: "symlog",
+    negExtent: Math.abs(range.min ?? range.p02 ?? 0),
+    posExtent: Math.abs(range.max ?? range.p98 ?? 0),
+    linthresh: range.zeroHalfWidth ?? 0,
+    gamma: 1,
+  };
+  const tickPositions = [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1];
+  const values = tickPositions.map((t) => inverseNormalizeDivergingValue(t, scale));
 
   const wrap = document.createElement("div");
   wrap.className = "map-legend-continuous";
 
   const gradient = document.createElement("div");
   gradient.className = "map-legend-gradient";
-  gradient.style.background = continuousLegendGradient(min, max, neutral);
+  gradient.style.background = continuousLegendGradient(scale);
+  gradient.appendChild(renderLegendGridlines(tickPositions));
 
   const ticks = document.createElement("div");
   ticks.className = "map-legend-ticks";
-  values.forEach((value) => {
+  values.forEach((value, index) => {
     const tick = document.createElement("span");
     tick.textContent = formatLegendNumber(value);
     tick.title = unit;
+    tick.style.left = `${((tickPositions[index] + 1) / 2) * 100}%`;
+    if (index === 0) tick.dataset.edge = "start";
+    if (index === values.length - 1) tick.dataset.edge = "end";
     ticks.appendChild(tick);
   });
 
-  const marker = renderLegendMarker(getSelectedLegendValue(), min, max, unit);
+  const marker = renderNormalizedLegendMarker(getSelectedLegendValue(), scale, unit);
   wrap.append(gradient, ticks);
   if (marker) wrap.appendChild(marker);
   els.legendItems.replaceChildren(wrap);
 }
 
-function continuousLegendGradient(min, max, neutralHalfWidth) {
+function renderLegendGridlines(tickPositions) {
+  const grid = document.createElement("div");
+  grid.className = "map-legend-gridlines";
+  tickPositions.forEach((position) => {
+    const line = document.createElement("span");
+    line.style.left = `${((position + 1) / 2) * 100}%`;
+    if (position === 0) line.dataset.major = "true";
+    grid.appendChild(line);
+  });
+  return grid;
+}
+
+function continuousLegendGradient(scale) {
   const stops = [];
   const sampleCount = 24;
   for (let index = 0; index <= sampleCount; index += 1) {
     const percent = (index / sampleCount) * 100;
-    const value = min + ((max - min) * index) / sampleCount;
-    stops.push(`${rgbCss(colorForDivergingRangeValue(value, min, max, neutralHalfWidth))} ${percent}%`);
+    const t = -1 + (2 * index) / sampleCount;
+    stops.push(`${rgbCss(colorForNormalizedValue(t))} ${percent}%`);
   }
   return `linear-gradient(90deg, ${stops.join(", ")})`;
+}
+
+function inverseNormalizeDivergingValue(t, scale) {
+  const clamped = clamp(t, -1, 1);
+  if (clamped === 0) return 0;
+  const sign = clamped < 0 ? -1 : 1;
+  const extent = sign < 0 ? scale.negExtent : scale.posExtent;
+  const magnitude = inverseNormalizeMagnitude(Math.abs(clamped), extent, scale.linthresh ?? 0, scale);
+  return sign * magnitude;
+}
+
+function inverseNormalizeMagnitude(t, extent, linthresh, scale) {
+  if (t <= 0) return 0;
+  const usableExtent = Math.max(extent - linthresh, 0.000001);
+  if (scale.mode === "linear") return linthresh + t * usableExtent;
+  if (scale.mode === "power") {
+    const gamma = Math.max(scale.gamma ?? 1, 0.000001);
+    return linthresh + Math.pow(t, 1 / gamma) * usableExtent;
+  }
+  const base = Math.max(linthresh, usableExtent * 0.02, 0.000001);
+  return linthresh + base * Math.expm1(t * Math.log1p(usableExtent / base));
 }
 
 function renderLegendMarker(value, min, max, unit) {
@@ -2019,6 +2294,16 @@ function renderLegendMarker(value, min, max, unit) {
   marker.className = "map-legend-marker";
   const percent = clamp(((value - min) / (max - min)) * 100, 0, 100);
   marker.style.left = `${percent}%`;
+  marker.title = `Selected pixel: ${formatLegendNumber(value)} ${unit}`;
+  return marker;
+}
+
+function renderNormalizedLegendMarker(value, scale, unit) {
+  if (value === null || value === undefined || Number.isNaN(value)) return null;
+  const marker = document.createElement("span");
+  marker.className = "map-legend-marker";
+  const normalized = normalizeDivergingValue(value, scale);
+  marker.style.left = `${((normalized.t + 1) / 2) * 100}%`;
   marker.title = `Selected pixel: ${formatLegendNumber(value)} ${unit}`;
   return marker;
 }
