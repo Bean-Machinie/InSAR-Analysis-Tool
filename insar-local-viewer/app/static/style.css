@@ -349,12 +349,14 @@ input:focus-visible,
   line-height: 1.25;
 }
 
-.scale-options {
+.scale-options,
+.shape-options {
   display: grid;
   gap: 8px;
 }
 
-.scale-option {
+.scale-option,
+.shape-option {
   align-items: center;
   background: #ffffff;
   border: 1px solid var(--border);
@@ -367,29 +369,71 @@ input:focus-visible,
   text-align: left;
 }
 
-.scale-option:hover {
+.scale-option:hover,
+.shape-option:hover {
   border-color: #bbb8aa;
   box-shadow: var(--shadow-sm);
   transform: none;
 }
 
-.scale-option.active {
+.scale-option.active,
+.shape-option.active {
   border-color: rgba(17, 17, 17, 0.52);
   box-shadow: inset 3px 0 0 rgba(17, 17, 17, 0.84);
 }
 
-.scale-option-label {
+.scale-option-label,
+.shape-option-label {
   font-size: 0.86rem;
   font-weight: 850;
   line-height: 1.15;
 }
 
-.scale-option-detail {
+.scale-option-detail,
+.shape-option-detail {
   color: var(--muted);
   font-family: Inter, "Segoe UI", Arial, sans-serif;
   font-size: 0.73rem;
   font-weight: 700;
   line-height: 1.25;
+}
+
+.settings-field {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-field + .settings-field {
+  margin-top: 12px;
+}
+
+.settings-field span {
+  color: var(--text);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.settings-field input {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  font: 700 0.84rem Inter, "Segoe UI", Arial, sans-serif;
+  padding: 10px 11px;
+}
+
+.settings-field input:focus {
+  border-color: rgba(17, 17, 17, 0.64);
+  box-shadow: 0 0 0 2px rgba(252, 217, 0, 0.54);
+  outline: none;
+}
+
+.settings-field small {
+  color: var(--muted);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 650;
 }
 
 .heatmap-preview {

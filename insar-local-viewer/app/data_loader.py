@@ -19,6 +19,11 @@ RMSE_CANDIDATES = ["sbas_rmse_raw", "sbas_rmse_masked"]
 DEM_CANDIDATES = ["dem", "elevation", "topography"]
 COHERENCE_STACK_NAME = "coherence_stack"
 COHERENCE_DATE_STACK_CANDIDATES = ["coherence_per_date", "pairwise_coherence_attributed_to_date"]
+FERRETTI_POINTS_FILENAMES = [
+    "ferretti_ps_final_points.csv",
+]
+FERRETTI_TIMESERIES_FILENAME = "ferretti_ps_deformation_timeseries_wide.csv"
+FERRETTI_MANIFEST_FILENAME = "ferretti_ps_final_manifest.json"
 
 
 class ProjectDataError(Exception):
@@ -88,6 +93,10 @@ def open_dataset(project_dir: Path):
 
 
 def get_project_info(project_dir: Path) -> dict:
+    ferretti_dir = _select_ferretti_project_dir(project_dir)
+    if ferretti_dir is not None:
+        return _get_ferretti_project_info(ferretti_dir)
+
     selected_file, dataset = open_dataset(project_dir)
     try:
         resolved_project_dir = selected_file.parent
@@ -114,6 +123,7 @@ def get_project_info(project_dir: Path) -> dict:
             "date_count": int(len(dates)),
             "dates": dates,
             "bounds": _bounds(lat, lon),
+            "pixel_footprint_m": _pixel_footprints_m(resolved_project_dir),
             "metadata": metadata,
             "ps_points": {
                 "available": ps_points["available"],
@@ -126,6 +136,10 @@ def get_project_info(project_dir: Path) -> dict:
 
 
 def get_map_data(project_dir: Path) -> dict:
+    ferretti_dir = _select_ferretti_project_dir(project_dir)
+    if ferretti_dir is not None:
+        return _get_ferretti_map_data(ferretti_dir)
+
     selected_file, dataset = open_dataset(project_dir)
     try:
         resolved_project_dir = selected_file.parent
@@ -164,6 +178,7 @@ def get_map_data(project_dir: Path) -> dict:
                 "lon_count": int(lon.size),
                 "date_count": int(len(dates)),
                 "bounds": _bounds(lat, lon),
+                "pixel_footprint_m": _pixel_footprints_m(resolved_project_dir),
                 "last_updated": _project_last_updated(resolved_project_dir),
             },
             "dates": dates,
@@ -388,7 +403,7 @@ def _bounds(lat, lon):
 
 def _read_project_metadata(project_dir: Path):
     metadata = {}
-    for filename in ["parameters.json", "manifest.json", "sbas_results_metadata.json"]:
+    for filename in ["parameters.json", "manifest.json", "sbas_results_metadata.json", FERRETTI_MANIFEST_FILENAME]:
         path = project_dir / filename
         if not path.exists():
             continue
@@ -404,7 +419,7 @@ def _project_last_updated(project_dir: Path):
     metadata = _read_project_metadata(project_dir)
     parameters = metadata.get("parameters.json", {})
     manifest = metadata.get("manifest.json", {})
-    return parameters.get("processing_date") or manifest.get("created")
+    return parameters.get("processing_date") or manifest.get("created") or manifest.get("created_utc")
 
 
 def _axis_to_json(values):
@@ -420,17 +435,133 @@ def _array_to_json(values):
     raise ProjectDataError("Only 2D and 3D arrays can be serialized for map display")
 
 
+def _select_ferretti_project_dir(project_dir: Path) -> Path | None:
+    if not project_dir.exists() or not project_dir.is_dir():
+        return None
+
+    candidates = [project_dir]
+    candidates.extend(path for path in sorted(project_dir.glob(f"**/{FERRETTI_MANIFEST_FILENAME}")) if path.is_file())
+
+    for candidate in candidates:
+        candidate_dir = candidate if candidate.is_dir() else candidate.parent
+        if not (candidate_dir / FERRETTI_MANIFEST_FILENAME).exists():
+            continue
+        points_path = next((candidate_dir / filename for filename in FERRETTI_POINTS_FILENAMES if (candidate_dir / filename).exists()), None)
+        if points_path is None:
+            continue
+        with points_path.open(newline="", encoding="utf-8") as file:
+            fields = csv.DictReader(file).fieldnames or []
+        if {"longitude", "latitude"}.issubset(fields):
+            return candidate_dir
+    return None
+
+
+def _get_ferretti_project_info(project_dir: Path) -> dict:
+    ps_points = _read_ps_points(project_dir, include_points=False)
+    dates, _ = _read_ps_timeseries_wide(project_dir / FERRETTI_TIMESERIES_FILENAME)
+    bounds = _ps_bounds(project_dir)
+    points_file, _, _ = _ps_source_files(project_dir)
+    return {
+        "project_path": str(project_dir),
+        "selected_file": str(points_file),
+        "dataset_file": points_file.name,
+        "dataset_kind": "ferretti_ps",
+        "products": {
+            "velocity": False,
+            "deformation": False,
+            "coherence": False,
+            "terrain": False,
+            "ps_points": True,
+        },
+        "lat_count": 0,
+        "lon_count": 0,
+        "date_count": len(dates),
+        "dates": dates,
+        "bounds": bounds,
+        "pixel_footprint_m": _pixel_footprints_m(project_dir),
+        "metadata": _read_project_metadata(project_dir),
+        "ps_points": {
+            "available": True,
+            "count": ps_points["count"],
+            "geocoded_count": ps_points["geocoded_count"],
+        },
+    }
+
+
+def _get_ferretti_map_data(project_dir: Path) -> dict:
+    ps_points = _read_ps_points(project_dir)
+    dates = ps_points["dates"]
+    points_file, _, _ = _ps_source_files(project_dir)
+    pair_count = max((point.get("valid_pair_count") or 0 for point in ps_points["points"]), default=0)
+    empty_range = {"min": None, "max": None, "p02": None, "p98": None}
+    return {
+        "project": {
+            "project_path": str(project_dir),
+            "selected_file": str(points_file),
+            "dataset_file": points_file.name,
+            "dataset_kind": "ferretti_ps",
+            "lat_count": 0,
+            "lon_count": 0,
+            "date_count": len(dates),
+            "bounds": _ps_bounds(project_dir),
+            "pixel_footprint_m": _pixel_footprints_m(project_dir),
+            "last_updated": _project_last_updated(project_dir),
+        },
+        "dates": dates,
+        "lat": [],
+        "lon": [],
+        "layers": {
+            "velocity": {"values": [], "range": empty_range, "unit": "mm/year"},
+            "deformation": {"values": [], "range": empty_range, "unit": "mm"},
+            "coherence": {"values": [], "stack": [], "pairs": [], "pair_baselines_days": [], "stack_kind": "summary", "range": empty_range, "unit": "unitless"},
+            "rmse": {"values": [], "unit": "mm"},
+            "coherence_stability": {"values": [], "unit": "unitless"},
+            "n_good_pairs": {"values": [], "unit": "count", "n_pairs_total": pair_count},
+            "terrain": {"values": None, "range": empty_range, "unit": "m", "source": "flat-fallback"},
+            "ps_points": ps_points,
+        },
+    }
+
+
+def _ps_source_files(project_dir: Path):
+    standard_csv = project_dir / "ps_points" / "ps_points.csv"
+    if standard_csv.exists():
+        return standard_csv, project_dir / "ps_points" / "ps_timeseries_wide.csv", "sbas_ps"
+
+    for filename in FERRETTI_POINTS_FILENAMES:
+        csv_path = project_dir / filename
+        if csv_path.exists():
+            return csv_path, project_dir / FERRETTI_TIMESERIES_FILENAME, "ferretti_ps"
+    return None, None, None
+
+
+def _ps_bounds(project_dir: Path):
+    csv_path, _, _ = _ps_source_files(project_dir)
+    lat = []
+    lon = []
+    with csv_path.open(newline="", encoding="utf-8") as file:
+        for row in csv.DictReader(file):
+            row_lat = _first_optional_float(row, ["lat", "latitude"])
+            row_lon = _first_optional_float(row, ["lon", "longitude"])
+            if row_lat is not None and row_lon is not None:
+                lat.append(row_lat)
+                lon.append(row_lon)
+    if not lat or not lon:
+        raise ProjectDataError(f"No geocoded PS points found in project folder: {project_dir}")
+    return _bounds(np.asarray(lat), np.asarray(lon))
+
+
 def _read_ps_points(project_dir: Path, include_points: bool = True) -> dict:
-    csv_path = project_dir / "ps_points" / "ps_points.csv"
-    timeseries_path = project_dir / "ps_points" / "ps_timeseries_wide.csv"
-    pixel_size_m = _ps_pixel_size_m(project_dir)
-    if not csv_path.exists():
+    csv_path, timeseries_path, source = _ps_source_files(project_dir)
+    footprint = _pixel_footprints_m(project_dir)
+    if csv_path is None:
         return {
             "available": False,
+            "source": None,
             "count": 0,
             "geocoded_count": 0,
-            "pixel_size_m": pixel_size_m,
-            "pixel_radius_m": pixel_size_m / 2 if pixel_size_m else None,
+            "pixel_width_m": footprint["ps"]["width_m"],
+            "pixel_height_m": footprint["ps"]["height_m"],
             "dates": [],
             "points": [],
             "ranges": _ps_empty_ranges(),
@@ -445,28 +576,39 @@ def _read_ps_points(project_dir: Path, include_points: bool = True) -> dict:
         reader = csv.DictReader(file)
         for row in reader:
             total += 1
-            lon = _optional_float(row.get("lon"))
-            lat = _optional_float(row.get("lat"))
+            lon = _first_optional_float(row, ["lon", "longitude"])
+            lat = _first_optional_float(row, ["lat", "latitude"])
             if lon is None or lat is None:
                 continue
 
             point = {
-                "ps_id": _optional_int(row.get("ps_id")),
+                "ps_id": _first_optional_int(row, ["ps_id", "point_id"]),
                 "lon": lon,
                 "lat": lat,
-                "velocity_mm_yr": _optional_float(row.get("velocity_mm_yr")),
+                "velocity_mm_yr": _first_optional_float(row, ["velocity_mm_yr", "velocity_relative_mm_yr"]),
                 "displacement_last_mm": _optional_float(row.get("displacement_last_mm")),
                 "displacement_delta_mm": _optional_float(row.get("displacement_delta_mm")),
-                "rmse_mm": _optional_float(row.get("rmse_mm")),
-                "psf": _optional_float(row.get("psf")),
-                "corr_median": _optional_float(row.get("corr_median")),
+                "rmse_mm": _first_optional_float(row, ["rmse_mm", "rmse_rad", "residual_rmse_after_aps_rad"]),
+                "rmse_unit": "rad" if _first_optional_float(row, ["rmse_rad", "residual_rmse_after_aps_rad"]) is not None else "mm",
+                "psf": _first_optional_float(row, ["psf", "amplitude_dispersion_index"]),
+                "corr_median": _first_optional_float(row, ["corr_median", "gamma", "residual_gamma_after_aps"]),
                 "corr_mean": _optional_float(row.get("corr_mean")),
                 "valid_pair_count": _optional_int(row.get("valid_pair_count")),
                 "first_date": row.get("first_date") or None,
                 "last_date": row.get("last_date") or None,
+                "dem_error_m": _first_optional_float(row, ["dem_error_m", "height_relative_m"]),
+                "gamma": _first_optional_float(row, ["gamma", "residual_gamma_after_aps"]),
+                "amplitude_dispersion_index": _optional_float(row.get("amplitude_dispersion_index")),
+                "is_reference_ps": _optional_bool(row.get("is_reference_ps")),
+                "reference_ps_id": _optional_int(row.get("reference_ps_id")),
             }
             if include_points:
                 point["timeseries"] = ps_timeseries.get(point["ps_id"], [])
+                if point["timeseries"]:
+                    point["displacement_last_mm"] = point["timeseries"][-1]
+                    valid_values = [value for value in point["timeseries"] if value is not None]
+                    if valid_values:
+                        point["displacement_delta_mm"] = valid_values[-1] - valid_values[0]
             for key in metric_values:
                 value = point.get(key)
                 if value is not None:
@@ -476,10 +618,11 @@ def _read_ps_points(project_dir: Path, include_points: bool = True) -> dict:
 
     return {
         "available": True,
+        "source": source,
         "count": total,
         "geocoded_count": len(points) if include_points else sum(1 for _ in _iter_geocoded_ps_rows(csv_path)),
-        "pixel_size_m": pixel_size_m,
-        "pixel_radius_m": pixel_size_m / 2 if pixel_size_m else None,
+        "pixel_width_m": footprint["ps"]["width_m"],
+        "pixel_height_m": footprint["ps"]["height_m"],
         "dates": ps_dates,
         "points": points,
         "ranges": {
@@ -489,27 +632,46 @@ def _read_ps_points(project_dir: Path, include_points: bool = True) -> dict:
     }
 
 
-def _ps_pixel_size_m(project_dir: Path):
+def _pixel_footprints_m(project_dir: Path):
     metadata = _read_project_metadata(project_dir)
     processing = metadata.get("sbas_results_metadata.json", {}).get("processing", {})
-    return _optional_float(processing.get("geocode_resolution_m"))
+    coarsen = processing.get("sbas_coarsen") or [1, 1]
+    try:
+        coarsen_y = float(coarsen[0])
+        coarsen_x = float(coarsen[1])
+    except (TypeError, ValueError, IndexError):
+        coarsen_y = 1.0
+        coarsen_x = 1.0
+
+    ps_width_m = 3.4
+    ps_height_m = 13.5
+    return {
+        "ps": {
+            "width_m": ps_width_m,
+            "height_m": ps_height_m,
+            "source": "fallback:intf_ps_median_spacing",
+        },
+        "sbas": {
+            "width_m": ps_width_m * coarsen_x,
+            "height_m": ps_height_m * coarsen_y,
+            "coarsen": [coarsen_y, coarsen_x],
+            "source": "ps_footprint_times_sbas_coarsen",
+        },
+    }
 
 
-def _read_ps_timeseries_wide(csv_path: Path):
-    if not csv_path.exists():
+def _read_ps_timeseries_wide(csv_path: Path | None):
+    if csv_path is None or not csv_path.exists():
         return [], {}
 
     with csv_path.open(newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
         fields = reader.fieldnames or []
-        date_fields = [field for field in fields if field.startswith("d_")]
-        dates = [
-            f"{field[2:6]}-{field[6:8]}-{field[8:10]}"
-            for field in date_fields
-        ]
+        date_fields = [field for field in fields if field.startswith("d_") or _is_iso_date(field)]
+        dates = [f"{field[2:6]}-{field[6:8]}-{field[8:10]}" if field.startswith("d_") else field for field in date_fields]
         series_by_id = {}
         for row in reader:
-            ps_id = _optional_int(row.get("ps_id"))
+            ps_id = _first_optional_int(row, ["ps_id", "point_id"])
             if ps_id is None:
                 continue
             series_by_id[ps_id] = [_optional_float(row.get(field)) for field in date_fields]
@@ -520,7 +682,7 @@ def _iter_geocoded_ps_rows(csv_path: Path):
     with csv_path.open(newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
         for row in reader:
-            if _optional_float(row.get("lon")) is not None and _optional_float(row.get("lat")) is not None:
+            if _first_optional_float(row, ["lon", "longitude"]) is not None and _first_optional_float(row, ["lat", "latitude"]) is not None:
                 yield row
 
 
@@ -553,6 +715,40 @@ def _optional_float(value):
 def _optional_int(value):
     parsed = _optional_float(value)
     return None if parsed is None else int(parsed)
+
+
+def _optional_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return True
+    if text in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def _first_optional_float(row, keys):
+    for key in keys:
+        value = _optional_float(row.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _first_optional_int(row, keys):
+    value = _first_optional_float(row, keys)
+    return None if value is None else int(value)
+
+
+def _is_iso_date(value):
+    try:
+        np.datetime64(value, "D")
+        return len(value) == 10 and value[4] == "-" and value[7] == "-"
+    except (TypeError, ValueError):
+        return False
 
 
 def _robust_range(values, center_zero=False):

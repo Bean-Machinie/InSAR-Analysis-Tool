@@ -76,7 +76,23 @@
               <h3>Map</h3>
               <p>View controls</p>
             </header>
-            <div class="settings-empty">No map settings yet</div>
+            <div class="settings-subsection">
+              <h4>Pixel shape</h4>
+            </div>
+            <div id="pixel-shape-options" class="shape-options" role="radiogroup" aria-label="Pixel shape"></div>
+            <div class="settings-subsection">
+              <h4>Export title</h4>
+            </div>
+            <label class="settings-field" for="export-title-input">
+              <span>Custom PNG title</span>
+              <input id="export-title-input" type="text" maxlength="120" placeholder="Use the active layer title">
+              <small>Leave empty to use the current velocity or displacement title.</small>
+            </label>
+            <label class="settings-field" for="export-subtitle-input">
+              <span>Custom PNG subtext</span>
+              <input id="export-subtitle-input" type="text" maxlength="160" placeholder="Use the project folder name">
+              <small>Leave empty to use the loaded project folder name.</small>
+            </label>
           </section>
           <section class="settings-content" data-settings-content="quality" hidden>
             <header class="settings-content-header">
@@ -260,7 +276,7 @@
                     <dd id="pixel-coherence">-</dd>
                   </div>
                   <div>
-                    <dt>Stability (std) <span class="metric-hint">low = good</span></dt>
+                    <dt id="pixel-stability-label">Stability (std) <span class="metric-hint">low = good</span></dt>
                     <dd id="pixel-stability">-</dd>
                   </div>
                   <div>

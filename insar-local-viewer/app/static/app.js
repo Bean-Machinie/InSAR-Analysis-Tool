@@ -24,6 +24,9 @@ const state = {
   is3D: localStorage.getItem("insar-view-mode") === "3d",
   verticalExaggeration: Number(localStorage.getItem("insar-vertical-exaggeration")) || 1.5,
   heatmapPalette: localStorage.getItem("insar-heatmap-palette") || "spectral",
+  pixelShape: localStorage.getItem("insar-pixel-shape") || "rectangle",
+  exportTitle: localStorage.getItem("insar-export-title") || "",
+  exportSubtitle: localStorage.getItem("insar-export-subtitle") || "",
   scaleSettings: {
     mode: localStorage.getItem("insar-scale-mode") || "linear",
     percentile: 99.9,
@@ -50,6 +53,9 @@ const els = {
   settingsContents: document.querySelectorAll(".settings-content"),
   heatmapOptions: document.querySelector("#heatmap-options"),
   colorScaleOptions: document.querySelector("#color-scale-options"),
+  pixelShapeOptions: document.querySelector("#pixel-shape-options"),
+  exportTitleInput: document.querySelector("#export-title-input"),
+  exportSubtitleInput: document.querySelector("#export-subtitle-input"),
   datasetProjectLabel: document.querySelector("#dataset-project-label"),
   status: document.querySelector("#status"),
   datasetFile: document.querySelector("#dataset-file"),
@@ -101,6 +107,7 @@ const els = {
   pixelVelocity: document.querySelector("#pixel-velocity"),
   pixelCoherenceLabel: document.querySelector("#pixel-coherence-label"),
   pixelCoherence: document.querySelector("#pixel-coherence"),
+  pixelStabilityLabel: document.querySelector("#pixel-stability-label"),
   pixelStability: document.querySelector("#pixel-stability"),
   pixelGoodPairs: document.querySelector("#pixel-good-pairs"),
   pixelRmse: document.querySelector("#pixel-rmse"),
@@ -230,6 +237,17 @@ const COLOR_SCALE_MODES = {
   },
 };
 
+const PIXEL_SHAPES = {
+  rectangle: {
+    name: "Rectangles",
+    detail: "Display the ground footprint of each pixel",
+  },
+  circle: {
+    name: "Vector circles",
+    detail: "Display each pixel as a circular vector marker",
+  },
+};
+
 const COHERENCE_LEGEND_COLORS = [
   [31, 41, 55],
   [46, 86, 96],
@@ -248,6 +266,10 @@ if (!HEATMAP_PALETTES[state.heatmapPalette]) {
 
 if (!COLOR_SCALE_MODES[state.scaleSettings.mode]) {
   state.scaleSettings.mode = "linear";
+}
+
+if (!PIXEL_SHAPES[state.pixelShape]) {
+  state.pixelShape = "rectangle";
 }
 
 const THREE_VIEW_CONFIG = {
@@ -1009,34 +1031,86 @@ function drawPsPointTile(ctx, coords, tileSize) {
     const value = point[config.field];
     if (value === null || value === undefined || Number.isNaN(value)) return;
     const projected = state.map.project([point.lat, point.lon], coords.z);
-    if (!tileBounds.pad(0.04).contains(projected)) return;
+    const footprint = psFootprintPixels(point.lat, coords.z);
+    const pixelBounds = L.bounds(
+      L.point(projected.x - footprint.width / 2, projected.y - footprint.height / 2),
+      L.point(projected.x + footprint.width / 2, projected.y + footprint.height / 2),
+    );
+    if (!tileBounds.intersects(pixelBounds)) return;
 
     const x = projected.x - tileOrigin.x;
     const y = projected.y - tileOrigin.y;
-    const radius = psGroundRadiusPixels(point.lat, coords.z);
     const isSelected = state.selectedPsPoint?.ps_id === point.ps_id;
     const colorInfo = colorInfoForValue(value, state.psRange, config.field.includes("velocity") ? "velocity" : "deformation");
     const color = colorInfo.color;
 
-    ctx.beginPath();
-    ctx.arc(x, y, radius + (isSelected ? 4 : 1.1), 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.74)";
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    if (isSelected) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
+      drawPixelShape(ctx, x, y, footprint.width + 8, footprint.height + 8);
+    }
     ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.95)`;
-    ctx.fill();
-    ctx.lineWidth = isSelected ? 2.2 : 0.8;
-    ctx.strokeStyle = isSelected ? "#fcd900" : "rgba(17, 17, 17, 0.34)";
-    ctx.stroke();
+    drawPixelShape(ctx, x, y, footprint.width, footprint.height);
+    if (isSelected || Math.min(footprint.width, footprint.height) >= 2) {
+      ctx.lineWidth = isSelected ? 2.2 : Math.max(0.35, Math.min(0.8, Math.min(footprint.width, footprint.height) * 0.12));
+      ctx.strokeStyle = isSelected ? "#fcd900" : "rgba(17, 17, 17, 0.34)";
+      strokePixelShape(ctx, x, y, footprint.width, footprint.height);
+    }
   });
 }
 
-function psGroundRadiusPixels(lat, zoom = state.map?.getZoom?.() ?? 10) {
-  const radiusMeters = state.data?.layers?.ps_points?.pixel_radius_m;
-  if (!radiusMeters) return 3;
-  const metersPerPixel = (40075016.686 * Math.cos((lat * Math.PI) / 180)) / (256 * (2 ** zoom));
-  return Math.max(0.35, radiusMeters / Math.max(metersPerPixel, 0.000001));
+function metersPerPixelAtLat(lat, zoom = state.map?.getZoom?.() ?? 10) {
+  return (40075016.686 * Math.cos((lat * Math.PI) / 180)) / (256 * (2 ** zoom));
+}
+
+function groundMetersToPixels(meters, lat, zoom) {
+  const metersPerPixel = Math.max(metersPerPixelAtLat(lat, zoom), 0.000001);
+  return meters / metersPerPixel;
+}
+
+function psFootprintPixels(lat, zoom = state.map?.getZoom?.() ?? 10) {
+  const footprint = state.data?.layers?.ps_points;
+  const minSize = footprint?.source === "ferretti_ps" ? 5 : 0.05;
+  return {
+    width: Math.max(minSize, groundMetersToPixels(footprint?.pixel_width_m ?? 3.4, lat, zoom)),
+    height: Math.max(minSize, groundMetersToPixels(footprint?.pixel_height_m ?? 13.5, lat, zoom)),
+  };
+}
+
+function sbasFootprintPixels(lat, zoom = state.map?.getZoom?.() ?? 10) {
+  const footprint = state.data?.project?.pixel_footprint_m?.sbas;
+  if (!footprint?.width_m || !footprint?.height_m) return null;
+  return {
+    width: Math.max(0.05, groundMetersToPixels(footprint.width_m, lat, zoom)),
+    height: Math.max(0.05, groundMetersToPixels(footprint.height_m, lat, zoom)),
+  };
+}
+
+function drawCenteredRect(ctx, centerX, centerY, width, height) {
+  ctx.fillRect(centerX - width / 2, centerY - height / 2, width, height);
+}
+
+function strokeCenteredRect(ctx, centerX, centerY, width, height) {
+  ctx.strokeRect(centerX - width / 2, centerY - height / 2, width, height);
+}
+
+function drawPixelShape(ctx, centerX, centerY, width, height) {
+  if (state.pixelShape === "circle") {
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, Math.max(0.5, Math.min(width, height) * 0.48), 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  drawCenteredRect(ctx, centerX, centerY, width, height);
+}
+
+function strokePixelShape(ctx, centerX, centerY, width, height) {
+  if (state.pixelShape === "circle") {
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, Math.max(0.5, Math.min(width, height) * 0.48), 0, Math.PI * 2);
+    ctx.stroke();
+    return;
+  }
+  strokeCenteredRect(ctx, centerX, centerY, width, height);
 }
 
 function drawRasterTile(ctx, coords, tileSize) {
@@ -1059,47 +1133,32 @@ function drawRasterTile(ctx, coords, tileSize) {
 
       if (hiddenByFilter || value === null || Number.isNaN(value)) continue;
 
+      const centerLat = state.data.lat[row];
+      const centerLon = state.data.lon[col];
       const west = Math.min(lonEdges[col], lonEdges[col + 1]);
       const east = Math.max(lonEdges[col], lonEdges[col + 1]);
       const northWest = state.map.project([north, west], coords.z);
       const southEast = state.map.project([south, east], coords.z);
-      const cellBounds = L.bounds(northWest, southEast);
+      const cellWidth = Math.max(1, southEast.x - northWest.x);
+      const cellHeight = Math.max(1, southEast.y - northWest.y);
+      const projectedCenter = state.map.project([centerLat, centerLon], coords.z);
+      const footprint = sbasFootprintPixels(centerLat, coords.z) ?? { width: cellWidth, height: cellHeight };
+      const pixelBounds = L.bounds(
+        L.point(projectedCenter.x - footprint.width / 2, projectedCenter.y - footprint.height / 2),
+        L.point(projectedCenter.x + footprint.width / 2, projectedCenter.y + footprint.height / 2),
+      );
 
-      if (!tileBounds.intersects(cellBounds)) continue;
+      if (!tileBounds.intersects(pixelBounds)) continue;
 
-      const x = northWest.x - tileOrigin.x;
-      const y = northWest.y - tileOrigin.y;
-      const width = Math.max(1, southEast.x - northWest.x);
-      const height = Math.max(1, southEast.y - northWest.y);
-      const radius = Math.max(1, Math.min(width, height) * 0.48);
-      const centerX = x + width / 2;
-      const centerY = y + height / 2;
+      const centerX = projectedCenter.x - tileOrigin.x;
+      const centerY = projectedCenter.y - tileOrigin.y;
       const colorInfo = colorInfoForValue(value, state.rasterRange, state.activeLayer);
       const color = colorInfo.color;
 
       ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      ctx.fill();
-      drawOffscaleRing(ctx, centerX, centerY, radius, colorInfo);
+      drawPixelShape(ctx, centerX, centerY, footprint.width, footprint.height);
     }
   }
-}
-
-function drawOffscaleRing(ctx, centerX, centerY, radius, colorInfo) {
-  if (!colorInfo?.isOver && !colorInfo?.isUnder) return;
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radius + 1.2, 0, Math.PI * 2);
-  ctx.strokeStyle = colorInfo.isOver ? "rgba(20, 20, 20, 0.86)" : "rgba(255, 255, 255, 0.92)";
-  ctx.lineWidth = Math.max(1.25, radius * 0.16);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radius + 2.8, 0, Math.PI * 2);
-  ctx.strokeStyle = colorInfo.isOver ? "rgba(255, 255, 255, 0.82)" : "rgba(20, 20, 20, 0.82)";
-  ctx.lineWidth = Math.max(0.75, radius * 0.08);
-  ctx.stroke();
-  ctx.restore();
 }
 
 function axisEdges(values) {
@@ -1184,30 +1243,42 @@ function drawSelectedPixelTile(ctx, coords, tileSize) {
   const tileBounds = L.bounds(tileOrigin, tileOrigin.add(tileSize));
   const northWest = state.map.project([north, west], coords.z);
   const southEast = state.map.project([south, east], coords.z);
-  const cellBounds = L.bounds(northWest, southEast);
+  const centerLat = state.data.lat[row];
+  const centerLon = state.data.lon[col];
+  const projectedCenter = state.map.project([centerLat, centerLon], coords.z);
+  const fallbackWidth = Math.max(1, southEast.x - northWest.x);
+  const fallbackHeight = Math.max(1, southEast.y - northWest.y);
+  const footprint = sbasFootprintPixels(centerLat, coords.z) ?? { width: fallbackWidth, height: fallbackHeight };
+  const cellBounds = L.bounds(
+    L.point(projectedCenter.x - footprint.width / 2, projectedCenter.y - footprint.height / 2),
+    L.point(projectedCenter.x + footprint.width / 2, projectedCenter.y + footprint.height / 2),
+  );
 
   if (!tileBounds.intersects(cellBounds)) return;
 
-  const x = northWest.x - tileOrigin.x;
-  const y = northWest.y - tileOrigin.y;
-  const width = Math.max(1, southEast.x - northWest.x);
-  const height = Math.max(1, southEast.y - northWest.y);
-  const radius = Math.max(1, Math.min(width, height) * 0.48);
-  const centerX = x + width / 2;
-  const centerY = y + height / 2;
-  const ringWidth = Math.max(2, Math.min(4, radius * 0.42));
+  const centerX = projectedCenter.x - tileOrigin.x;
+  const centerY = projectedCenter.y - tileOrigin.y;
+  const ringWidth = Math.max(2, Math.min(4, Math.min(footprint.width, footprint.height) * 0.2));
 
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radius + ringWidth * 0.8, 0, Math.PI * 2);
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = ringWidth + 2;
-  ctx.stroke();
+  strokePixelShape(
+    ctx,
+    centerX,
+    centerY,
+    footprint.width + ringWidth * 1.6,
+    footprint.height + ringWidth * 1.6,
+  );
 
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radius + ringWidth * 0.8, 0, Math.PI * 2);
   ctx.strokeStyle = "#fcd900";
   ctx.lineWidth = ringWidth;
-  ctx.stroke();
+  strokePixelShape(
+    ctx,
+    centerX,
+    centerY,
+    footprint.width + ringWidth * 1.6,
+    footprint.height + ringWidth * 1.6,
+  );
 }
 
 function showMapContextMenu(event) {
@@ -1256,6 +1327,8 @@ async function exportMapImage() {
     drawRasterForExport(ctx, scale);
     drawSelectedPixelForExport(ctx, scale);
     drawExportStamp(ctx, scale);
+    drawExportLegend(ctx, scale);
+    drawLeafletScaleForExport(ctx, scale);
 
     const blob = await canvasToBlob(canvas);
     downloadBlob(blob, exportMapFilename());
@@ -1293,6 +1366,7 @@ async function export3DMapImage() {
     const ctx = canvas.getContext("2d");
     ctx.drawImage(view.renderer.domElement, 0, 0, exportWidth, exportHeight);
     drawExportStamp(ctx, scale);
+    drawExportLegend(ctx, scale);
     blob = await canvasToBlob(canvas);
   } finally {
     view.renderer.setPixelRatio(previousPixelRatio);
@@ -1358,36 +1432,35 @@ function drawPixelGridForExport(ctx, scale, values, colorResolver, options = {})
       const east = Math.max(lonEdges[col], lonEdges[col + 1]);
       const northWest = state.map.latLngToContainerPoint([north, west]);
       const southEast = state.map.latLngToContainerPoint([south, east]);
-      const width = Math.max(1, (southEast.x - northWest.x) * scale);
-      const height = Math.max(1, (southEast.y - northWest.y) * scale);
-      const radius = Math.max(1, Math.min(width, height) * 0.48);
-      const centerX = (northWest.x + (southEast.x - northWest.x) / 2) * scale;
-      const centerY = (northWest.y + (southEast.y - northWest.y) / 2) * scale;
+      const centerLat = state.data.lat[row];
+      const centerLon = state.data.lon[col];
+      const centerPoint = state.map.latLngToContainerPoint([centerLat, centerLon]);
+      const fallbackWidth = Math.max(1, (southEast.x - northWest.x) * scale);
+      const fallbackHeight = Math.max(1, (southEast.y - northWest.y) * scale);
+      const footprint = sbasFootprintPixels(centerLat) ?? {
+        width: fallbackWidth / scale,
+        height: fallbackHeight / scale,
+      };
+      const width = Math.max(1, footprint.width * scale);
+      const height = Math.max(1, footprint.height * scale);
+      const centerX = centerPoint.x * scale;
+      const centerY = centerPoint.y * scale;
 
       if (options.selectedOnly) {
-        const ringWidth = Math.max(3, Math.min(8, radius * 0.42));
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, radius + ringWidth * 0.8, 0, Math.PI * 2);
+        const ringWidth = Math.max(3, Math.min(8, Math.min(width, height) * 0.2));
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = ringWidth + 3;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, radius + ringWidth * 0.8, 0, Math.PI * 2);
+        strokePixelShape(ctx, centerX, centerY, width + ringWidth * 1.6, height + ringWidth * 1.6);
         ctx.strokeStyle = "#fcd900";
         ctx.lineWidth = ringWidth;
-        ctx.stroke();
+        strokePixelShape(ctx, centerX, centerY, width + ringWidth * 1.6, height + ringWidth * 1.6);
         return;
       }
 
       const resolvedColor = colorResolver({ value, row, col });
       const color = Array.isArray(resolvedColor) ? resolvedColor : resolvedColor.color;
       ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      ctx.fill();
-      if (!Array.isArray(resolvedColor)) {
-        drawOffscaleRing(ctx, centerX, centerY, radius, resolvedColor);
-      }
+      drawPixelShape(ctx, centerX, centerY, width, height);
     });
   });
 }
@@ -1396,22 +1469,178 @@ function drawExportStamp(ctx, scale) {
   if (!state.data || !state.activeLayer) return;
   const padding = 14 * scale;
   const lineHeight = 16 * scale;
-  const title = state.activeLayer === "deformation"
+  const defaultTitle = state.activeLayer === "deformation"
     ? `Displacement ${state.data.dates[state.dateIndex] || ""}`
     : layerText[state.activeLayer]?.title || "InSAR map";
-  const subtitle = projectFolderName(state.data.project.project_path);
+  const title = state.exportTitle.trim() || defaultTitle;
+  const subtitle = state.exportSubtitle.trim() || projectFolderName(state.data.project.project_path);
+  const titleFont = `800 ${13 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  const subtitleFont = `600 ${10 * scale}px Inter, Segoe UI, Arial, sans-serif`;
   ctx.save();
-  ctx.font = `${12 * scale}px Inter, Segoe UI, Arial, sans-serif`;
-  const width = Math.max(ctx.measureText(title).width, ctx.measureText(subtitle).width) + padding * 2;
+  ctx.font = titleFont;
+  const titleWidth = ctx.measureText(title).width;
+  ctx.font = subtitleFont;
+  const subtitleWidth = ctx.measureText(subtitle).width;
+  const width = Math.max(titleWidth, subtitleWidth) + padding * 1.2;
   const height = lineHeight * 2 + padding * 1.4;
   ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
   ctx.fillRect(padding, padding, width, height);
   ctx.fillStyle = "#111111";
-  ctx.font = `800 ${13 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  ctx.font = titleFont;
   ctx.fillText(title, padding * 1.6, padding + lineHeight);
   ctx.fillStyle = "#555555";
-  ctx.font = `600 ${10 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  ctx.font = subtitleFont;
   ctx.fillText(subtitle, padding * 1.6, padding + lineHeight * 2);
+  ctx.restore();
+}
+
+function drawExportLegend(ctx, scale) {
+  const legend = getExportLegendConfig();
+  if (!legend) return;
+
+  const margin = 18 * scale;
+  const panelWidth = Math.min(650 * scale, ctx.canvas.width - margin * 2);
+  const panelHeight = 104 * scale;
+  const x = ctx.canvas.width - panelWidth - margin;
+  const y = margin;
+  const innerX = x + 11 * scale;
+  const innerWidth = panelWidth - 22 * scale;
+  const headerBaseline = y + 17 * scale;
+  const dividerY = y + 28 * scale;
+  const barY = y + 49 * scale;
+  const barHeight = legend.type === "segmented" ? 18 * scale : 26 * scale;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
+  ctx.fillRect(x, y, panelWidth, panelHeight);
+  ctx.fillStyle = "#111111";
+  ctx.font = `900 ${14 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.fillText(legend.title, innerX, headerBaseline);
+  ctx.fillStyle = "#555555";
+  ctx.font = `italic 650 ${12 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  ctx.textAlign = "right";
+  ctx.fillText(legend.subtitle, innerX + innerWidth, headerBaseline);
+  ctx.strokeStyle = "rgba(17, 17, 17, 0.18)";
+  ctx.lineWidth = scale;
+  ctx.beginPath();
+  ctx.moveTo(innerX, dividerY);
+  ctx.lineTo(innerX + innerWidth, dividerY);
+  ctx.stroke();
+
+  if (legend.type === "segmented") {
+    const segmentWidth = innerWidth / legend.colors.length;
+    legend.colors.forEach((color, index) => {
+      ctx.fillStyle = rgbCss(color);
+      ctx.fillRect(innerX + segmentWidth * index, barY, segmentWidth + 1, barHeight);
+      if (index > 0) {
+        ctx.strokeStyle = "rgba(17, 17, 17, 0.22)";
+        ctx.lineWidth = scale;
+        ctx.beginPath();
+        ctx.moveTo(innerX + segmentWidth * index, barY);
+        ctx.lineTo(innerX + segmentWidth * index, barY + barHeight);
+        ctx.stroke();
+      }
+    });
+  } else {
+    const sampleCount = 64;
+    for (let index = 0; index < sampleCount; index += 1) {
+      const left = innerX + (innerWidth * index) / sampleCount;
+      const width = innerWidth / sampleCount + 1;
+      const t = -1 + (2 * index) / (sampleCount - 1);
+      ctx.fillStyle = rgbCss(colorForNormalizedValue(t));
+      ctx.fillRect(left, barY, width, barHeight);
+    }
+  }
+
+  ctx.strokeStyle = "rgba(17, 17, 17, 0.42)";
+  ctx.lineWidth = scale;
+  ctx.strokeRect(innerX, barY, innerWidth, barHeight);
+  const tickPositions = legend.type === "segmented"
+    ? [0, 0.5, 1]
+    : [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1];
+  if (legend.type !== "segmented") {
+    tickPositions.forEach((position) => {
+      const tickX = innerX + ((position + 1) / 2) * innerWidth;
+      ctx.strokeStyle = position === 0 ? "rgba(17, 17, 17, 0.58)" : "rgba(17, 17, 17, 0.28)";
+      ctx.lineWidth = (position === 0 ? 2 : 1) * scale;
+      ctx.beginPath();
+      ctx.moveTo(tickX, barY);
+      ctx.lineTo(tickX, barY + barHeight);
+      ctx.stroke();
+    });
+  }
+  ctx.fillStyle = "#222222";
+  ctx.font = `650 ${12 * scale}px Inter, Segoe UI, Arial, sans-serif`;
+  const ticks = legend.type === "segmented"
+    ? [0, 0.5, 1]
+    : tickPositions.map((t) => inverseNormalizeDivergingValue(t, legend.range.scale));
+  ticks.forEach((value, index) => {
+    const position = index / (ticks.length - 1);
+    ctx.textAlign = index === 0 ? "left" : index === ticks.length - 1 ? "right" : "center";
+    ctx.fillText(formatLegendNumber(value), innerX + innerWidth * position, y + 93 * scale);
+  });
+  ctx.restore();
+}
+
+function getExportLegendConfig() {
+  if (state.activeLayer === "coherence") {
+    return {
+      type: "segmented",
+      title: "Coherence",
+      subtitle: getCoherenceStackKind() === "pair" ? "pair reliability - unitless" : "median reliability - unitless",
+      colors: COHERENCE_LEGEND_COLORS,
+    };
+  }
+  if (state.activeLayer && state.rasterRange?.scale) {
+    const unit = state.activeLayer === "velocity" ? "mm/year" : "mm";
+    return {
+      type: "continuous",
+      title: state.activeLayer === "velocity" ? `Velocity (${unit})` : `Displacement (${unit})`,
+      subtitle: state.activeLayer === "deformation" ? getDeformationLegendDates() : "line of sight rate",
+      range: state.rasterRange,
+    };
+  }
+  if (state.psLayer && state.psRange?.scale) {
+    const config = getPsLayerConfig();
+    return {
+      type: "continuous",
+      title: config.title,
+      subtitle: `PS overlay - ${config.unit}`,
+      range: state.psRange,
+    };
+  }
+  return null;
+}
+
+function drawLeafletScaleForExport(ctx, scale) {
+  const mapRect = els.map.getBoundingClientRect();
+  const scaleControl = els.map.querySelector(".leaflet-control-scale");
+  if (!scaleControl || !mapRect.width || !mapRect.height) return;
+  const lines = Array.from(scaleControl.querySelectorAll(".leaflet-control-scale-line"));
+  ctx.save();
+  ctx.font = `${11 * scale}px Arial, Helvetica, sans-serif`;
+  ctx.textBaseline = "top";
+  lines.forEach((line) => {
+    const rect = line.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const x = (rect.left - mapRect.left) * scale;
+    const y = (rect.top - mapRect.top) * scale;
+    const width = rect.width * scale;
+    const height = rect.height * scale;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeStyle = "#777777";
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y + height);
+    ctx.lineTo(x + width, y + height);
+    ctx.lineTo(x + width, y);
+    ctx.stroke();
+    ctx.fillStyle = "#333333";
+    ctx.fillText(line.textContent.trim(), x + 5 * scale, y + 1 * scale);
+  });
   ctx.restore();
 }
 
@@ -1466,6 +1695,7 @@ function handleLeafletMapClick(event) {
     }
   }
 
+  if (!state.activeLayer || !state.data.lat.length || !state.data.lon.length) return;
   if (!leafletBounds().contains(event.latlng)) return;
   const row = nearestIndex(state.data.lat, event.latlng.lat);
   const col = nearestIndex(state.data.lon, event.latlng.lng);
@@ -1485,9 +1715,13 @@ function nearestPsPoint(containerPoint) {
   let nearestDistance = Infinity;
   points.forEach((point) => {
     const screenPoint = state.map.latLngToContainerPoint([point.lat, point.lon]);
+    const footprint = psFootprintPixels(point.lat);
+    const dx = Math.abs(screenPoint.x - containerPoint.x);
+    const dy = Math.abs(screenPoint.y - containerPoint.y);
+    const pad = 4;
+    const isInsideFootprint = dx <= footprint.width / 2 + pad && dy <= footprint.height / 2 + pad;
     const distance = screenPoint.distanceTo(containerPoint);
-    const tolerance = Math.max(5, psGroundRadiusPixels(point.lat) + 3);
-    if (distance <= tolerance && distance < nearestDistance) {
+    if (isInsideFootprint && distance < nearestDistance) {
       nearest = point;
       nearestDistance = distance;
     }
@@ -1509,6 +1743,9 @@ function nearestIndex(values, target) {
 }
 
 function syncViewMode() {
+  const supports3D = state.data?.project?.dataset_kind !== "ferretti_ps";
+  if (!supports3D) state.is3D = false;
+  els.view3dToggle.hidden = !supports3D;
   els.view3dToggle.setAttribute("aria-pressed", String(state.is3D));
   els.verticalExaggerationControl.hidden = !state.is3D;
   els.verticalExaggerationSlider.value = String(state.verticalExaggeration);
@@ -1843,7 +2080,6 @@ function update3DPoints() {
   const values = state.rasterValues;
   const offsets = [];
   const colors = [];
-  const offscaleFlags = [];
   const radius = current3DPointRadius();
   for (let row = 0; row < values.length; row += 1) {
     for (let col = 0; col < values[row].length; col += 1) {
@@ -1857,7 +2093,6 @@ function update3DPoints() {
       const position = worldPosition(row, col, THREE_VIEW_CONFIG.verticalOffsetMeters + radius);
       offsets.push(position.x, position.y, position.z);
       colors.push(color[0] / 255, color[1] / 255, color[2] / 255);
-      offscaleFlags.push(colorInfo.isUnder ? -1 : colorInfo.isOver ? 1 : 0);
     }
   }
 
@@ -1871,7 +2106,6 @@ function update3DPoints() {
   geometry.setAttribute("instanceOffset", new THREE.InstancedBufferAttribute(new Float32Array(offsets), 3));
   geometry.setAttribute("instanceColor", new THREE.InstancedBufferAttribute(new Float32Array(view.pixelBaseColors), 3));
   geometry.setAttribute("instanceRadius", new THREE.InstancedBufferAttribute(radii, 1));
-  geometry.setAttribute("instanceOffscale", new THREE.InstancedBufferAttribute(new Float32Array(offscaleFlags), 1));
   geometry.instanceCount = view.pixelInstances.length;
 
   const material = new THREE.ShaderMaterial({
@@ -1879,15 +2113,12 @@ function update3DPoints() {
       attribute vec3 instanceOffset;
       attribute vec3 instanceColor;
       attribute float instanceRadius;
-      attribute float instanceOffscale;
       varying vec3 vColor;
       varying vec3 vNormal;
-      varying float vOffscale;
 
       void main() {
         vColor = instanceColor;
         vNormal = normalize(normalMatrix * normal);
-        vOffscale = instanceOffscale;
         vec3 spherePosition = position * instanceRadius + instanceOffset;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(spherePosition, 1.0);
       }
@@ -1895,14 +2126,10 @@ function update3DPoints() {
     fragmentShader: `
       varying vec3 vColor;
       varying vec3 vNormal;
-      varying float vOffscale;
 
       void main() {
         float shade = 0.72 + 0.28 * max(dot(normalize(vNormal), normalize(vec3(0.35, 0.65, 0.7))), 0.0);
-        float rim = 1.0 - abs(normalize(vNormal).z);
-        vec3 rimColor = vOffscale > 0.0 ? vec3(0.05, 0.05, 0.05) : vec3(1.0, 1.0, 1.0);
-        vec3 color = abs(vOffscale) > 0.5 && rim > 0.48 ? mix(vColor * shade, rimColor, 0.72) : vColor * shade;
-        gl_FragColor = vec4(color, 1.0);
+        gl_FragColor = vec4(vColor * shade, 1.0);
       }
     `,
     depthTest: true,
@@ -2254,10 +2481,11 @@ function syncQualityControls() {
 function updateControls() {
   els.datasetOptions.forEach((option) => {
     const isPsOption = Boolean(option.dataset.psLayer);
+    const sbasLayerAvailable = isPsOption || Boolean(state.data?.project?.dataset_kind !== "ferretti_ps");
     const isSelected = isPsOption
       ? option.dataset.psLayer === state.psLayer
       : option.dataset.layer === state.selectedLayer;
-    option.hidden = isPsOption && !hasPsPoints();
+    option.hidden = isPsOption ? !hasPsPoints() : !sbasLayerAvailable;
     option.classList.toggle("active", isSelected);
     option.setAttribute("aria-selected", String(isSelected));
     option.dataset.activeLayer = String(!isPsOption && option.dataset.layer === state.activeLayer);
@@ -2340,6 +2568,12 @@ function updateCoherenceBaselineSummary(index) {
 }
 
 function updateStatusFooter() {
+  if (state.data && state.psLayer && hasPsPoints() && !state.activeLayer) {
+    const count = state.data.layers.ps_points.points.length;
+    els.visiblePixelStatus.textContent = `${count.toLocaleString()} PS points visible`;
+    els.lastUpdatedStatus.textContent = `Last updated: ${formatDateTime(state.data.project.last_updated)}`;
+    return;
+  }
   if (!state.data || !state.activeLayer) {
     els.visiblePixelStatus.textContent = "No pixels visible";
     els.lastUpdatedStatus.textContent = "Last updated: n/a";
@@ -2353,7 +2587,8 @@ function updateStatusFooter() {
 
 function updateAppTitle() {
   const projectName = state.data ? projectFolderName(state.data.project.project_path) : "No project loaded";
-  els.appTitle.textContent = `InSAR SBAS Viewer - ${projectName}`;
+  const viewerName = state.data?.project?.dataset_kind === "ferretti_ps" ? "InSAR PSI Viewer" : "InSAR SBAS Viewer";
+  els.appTitle.textContent = `${viewerName} - ${projectName}`;
 }
 
 function formatDateTime(value) {
@@ -2662,18 +2897,22 @@ function updatePixelInfo() {
 function updatePsPixelInfo(point) {
   const validPairs = point.valid_pair_count ?? "-";
   const totalPairs = state.data?.layers?.n_good_pairs?.n_pairs_total ?? "-";
+  const isFerretti = state.data?.layers?.ps_points?.source === "ferretti_ps";
   els.pixelLat.textContent = formatNumber(point.lat, 6);
   els.pixelLon.textContent = formatNumber(point.lon, 6);
   els.pixelElevation.textContent = "n/a";
   els.pixelVelocity.textContent = `${formatNumber(point.velocity_mm_yr)} mm/year`;
-  els.pixelCoherenceLabel.innerHTML = "Median correlation <span class=\"metric-hint\">high = good</span>";
+  els.pixelCoherenceLabel.innerHTML = `${isFerretti ? "Residual gamma after APS" : "Median correlation"} <span class="metric-hint">high = good</span>`;
   els.pixelCoherence.textContent = formatNumber(point.corr_median, 2);
+  els.pixelStabilityLabel.innerHTML = isFerretti
+    ? "Amplitude dispersion index <span class=\"metric-hint\">low = good</span>"
+    : "Stability (std) <span class=\"metric-hint\">low = good</span>";
   els.pixelStability.textContent = formatNumber(point.psf, 2);
   els.pixelGoodPairs.textContent = `${validPairs} / ${totalPairs}`;
-  els.pixelRmse.textContent = `${formatNumber(point.rmse_mm, 2)} mm`;
+  els.pixelRmse.textContent = `${formatNumber(point.rmse_mm, 2)} ${point.rmse_unit ?? "mm"}`;
   els.pixelDeformation.textContent = `${formatNumber(point.displacement_last_mm)} mm`;
-  els.pixelPasses.textContent = "PS geocoded";
-  els.pixelPanelSubtitle.textContent = `PS ${point.ps_id} - ${formatNumber(point.lat, 5)}, ${formatNumber(point.lon, 5)}`;
+  els.pixelPasses.textContent = point.is_reference_ps ? "Reference PS" : "PS geocoded";
+  els.pixelPanelSubtitle.textContent = `PS ${point.ps_id}${point.is_reference_ps ? " (reference)" : ""} - ${formatNumber(point.lat, 5)}, ${formatNumber(point.lon, 5)}`;
   updateLegendIndicator();
 }
 
@@ -2684,6 +2923,7 @@ function resetPixelInfo() {
   els.pixelVelocity.textContent = "-";
   els.pixelCoherenceLabel.innerHTML = "Median coherence <span class=\"metric-hint\">high = good</span>";
   els.pixelCoherence.textContent = "-";
+  els.pixelStabilityLabel.innerHTML = "Stability (std) <span class=\"metric-hint\">low = good</span>";
   els.pixelStability.textContent = "-";
   els.pixelGoodPairs.textContent = "-";
   els.pixelRmse.textContent = "-";
@@ -2781,13 +3021,32 @@ function renderDatasetDetails() {
   const bounds = project.bounds;
   els.datasetProjectLabel.textContent = `Project: ${projectFolderName(project.project_path)}`;
   els.datasetFile.textContent = project.dataset_file;
-  els.gridDetails.textContent = `${project.lat_count} rows x ${project.lon_count} columns, ${project.date_count} dates`;
+  els.gridDetails.textContent = project.dataset_kind === "ferretti_ps"
+    ? `${state.data.layers.ps_points.points.length} geocoded PS points, ${project.date_count} dates`
+    : `${project.lat_count} rows x ${project.lon_count} columns, ${project.date_count} dates`;
   els.boundsDetails.textContent = `${formatNumber(bounds.lat_min, 5)} to ${formatNumber(bounds.lat_max, 5)} lat; ${formatNumber(bounds.lon_min, 5)} to ${formatNumber(bounds.lon_max, 5)} lon`;
 }
 
 function projectFolderName(projectPath) {
   const parts = String(projectPath).split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] || "Loaded project";
+}
+
+function initializeLoadedProjectState() {
+  initializeFilterThresholds();
+  state.dateIndex = Math.max(0, state.data.dates.length - 1);
+  state.coherencePairIndex = 0;
+  state.selectedPixel = null;
+  state.selectedPsPoint = null;
+
+  if (state.data.project.dataset_kind === "ferretti_ps") {
+    state.selectedLayer = null;
+    state.activeLayer = null;
+    state.psLayer = "velocity";
+    state.is3D = false;
+  } else if (!state.data.layers.ps_points?.available) {
+    state.psLayer = null;
+  }
 }
 
 async function loadProject(projectPath = "") {
@@ -2801,12 +3060,7 @@ async function loadProject(projectPath = "") {
       });
     }
     state.data = await fetchJson("/api/map-data");
-    initializeFilterThresholds();
-    state.dateIndex = 0;
-    state.coherencePairIndex = 0;
-    state.selectedPixel = null;
-    state.selectedPsPoint = null;
-    if (!state.data.layers.ps_points?.available) state.psLayer = null;
+    initializeLoadedProjectState();
     minimizePixelPanel({ keepPanelVisible: false });
     resetMapLayers();
     renderDatasetDetails();
@@ -2837,6 +3091,9 @@ function closeDatasetModal() {
 
 function openSettingsModal() {
   renderHeatmapOptions();
+  renderPixelShapeOptions();
+  els.exportTitleInput.value = state.exportTitle;
+  els.exportSubtitleInput.value = state.exportSubtitle;
   setSettingsPanel("heatmaps");
   els.settingsModal.hidden = false;
   els.settingsModal.setAttribute("aria-hidden", "false");
@@ -2940,6 +3197,49 @@ function selectColorScaleMode(mode) {
   drawMap();
 }
 
+function renderPixelShapeOptions() {
+  if (!els.pixelShapeOptions) return;
+  const options = Object.entries(PIXEL_SHAPES).map(([key, shape]) => {
+    const button = document.createElement("button");
+    button.className = "shape-option";
+    button.type = "button";
+    button.dataset.pixelShape = key;
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", String(key === state.pixelShape));
+    button.classList.toggle("active", key === state.pixelShape);
+
+    const label = document.createElement("span");
+    label.className = "shape-option-label";
+    label.textContent = shape.name;
+
+    const detail = document.createElement("span");
+    detail.className = "shape-option-detail";
+    detail.textContent = shape.detail;
+
+    button.append(label, detail);
+    return button;
+  });
+  els.pixelShapeOptions.replaceChildren(...options);
+}
+
+function selectPixelShape(shape) {
+  if (!PIXEL_SHAPES[shape]) return;
+  state.pixelShape = shape;
+  localStorage.setItem("insar-pixel-shape", shape);
+  renderPixelShapeOptions();
+  drawMap();
+}
+
+function setExportTitle(title) {
+  state.exportTitle = title;
+  localStorage.setItem("insar-export-title", title);
+}
+
+function setExportSubtitle(subtitle) {
+  state.exportSubtitle = subtitle;
+  localStorage.setItem("insar-export-subtitle", subtitle);
+}
+
 function paletteGradient(colors) {
   const stops = colors.map((color, index) => {
     const percent = colors.length === 1 ? 0 : (index / (colors.length - 1)) * 100;
@@ -3007,12 +3307,7 @@ async function openProjectFromFolderPicker() {
     }
 
     state.data = await fetchJson("/api/map-data");
-    initializeFilterThresholds();
-    state.dateIndex = 0;
-    state.coherencePairIndex = 0;
-    state.selectedPixel = null;
-    state.selectedPsPoint = null;
-    if (!state.data.layers.ps_points?.available) state.psLayer = null;
+    initializeLoadedProjectState();
     minimizePixelPanel({ keepPanelVisible: false });
     resetMapLayers();
     renderDatasetDetails();
@@ -3041,6 +3336,7 @@ els.mapFrame.addEventListener("contextmenu", showMapContextMenu, true);
 els.exportMapImageButton.addEventListener("click", exportMapImage);
 
 els.view3dToggle.addEventListener("click", () => {
+  if (state.data?.project?.dataset_kind === "ferretti_ps") return;
   state.is3D = !state.is3D;
   localStorage.setItem("insar-view-mode", state.is3D ? "3d" : "2d");
   syncViewMode();
@@ -3109,6 +3405,20 @@ els.colorScaleOptions?.addEventListener("click", (event) => {
   const option = event.target.closest(".scale-option");
   if (!option) return;
   selectColorScaleMode(option.dataset.scaleMode);
+});
+
+els.pixelShapeOptions?.addEventListener("click", (event) => {
+  const option = event.target.closest(".shape-option");
+  if (!option) return;
+  selectPixelShape(option.dataset.pixelShape);
+});
+
+els.exportTitleInput?.addEventListener("input", () => {
+  setExportTitle(els.exportTitleInput.value);
+});
+
+els.exportSubtitleInput?.addEventListener("input", () => {
+  setExportSubtitle(els.exportSubtitleInput.value);
 });
 
 els.datasetSelectButton.addEventListener("click", () => {

@@ -82,6 +82,24 @@ DEFAULT_PROJECT_DIR = BASE_DIR / "data" / "project_D"
 Then start the app and choose `File > Open Project...`, or keep using the
 default project path in `app/main.py`.
 
+The viewer also accepts standalone Ferretti PSI result folders. Use
+`Open project...` and select a folder with this structure:
+
+```text
+ferretti_ps_test_ferretti_style_ps_final/
+|-- ferretti_ps_final_manifest.json
+|-- ferretti_ps_final_points.csv
+|-- ferretti_ps_final_points.geojson
+|-- ferretti_ps_final_points.gpkg
+|-- ferretti_ps_deformation_timeseries_wide.csv
+`-- ferretti_ps_deformation_timeseries_long.csv
+```
+
+For PSI-only folders, the viewer opens the geocoded persistent scatterer
+velocity layer automatically. Click a point to inspect APS-corrected residual
+gamma, RMSE, amplitude dispersion, valid-pair count, and its displacement time
+series.
+
 ## NetCDF Selection Order
 
 The app automatically selects the first available file in this order:
@@ -108,6 +126,13 @@ filtering visually in the browser:
 
 Raw variable names are used internally and are not presented as primary layer
 choices in the normal UI.
+
+Standalone Ferretti PSI folders expose:
+
+- `PS Velocity`: LOS velocity in mm/year
+- `PS Last Displacement`: final LSQ displacement in mm
+- Point inspection: APS-corrected residual gamma, RMSE in radians, amplitude
+  dispersion index, valid-pair count, and reference PS status
 
 ## What This Version Can Do
 
