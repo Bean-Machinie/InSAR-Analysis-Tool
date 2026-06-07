@@ -6,6 +6,8 @@ const state = {
   coherencePairIndex: 0,
   qualityThresholds: {
     coherence: 0.3,
+    rmse: null,
+    significantOnly: false,
     stability: 0.2,
     goodPairs: 0,
   },
@@ -15,6 +17,7 @@ const state = {
   rasterLayer: null,
   rasterValues: null,
   rasterRange: null,
+  gridCache: null,
   selectedPixelLayer: null,
   hasFitProjectBounds: false,
   is3D: localStorage.getItem("insar-view-mode") === "3d",
@@ -77,6 +80,9 @@ const els = {
   filterPanel: document.querySelector("#filter-panel"),
   coherenceThresholdSlider: document.querySelector("#coherence-threshold-slider"),
   coherenceThresholdValue: document.querySelector("#coherence-threshold-value"),
+  rmseThresholdSlider: document.querySelector("#rmse-threshold-slider"),
+  rmseThresholdValue: document.querySelector("#rmse-threshold-value"),
+  significantOnlyToggle: document.querySelector("#significant-only-toggle"),
   stabilityMaxSlider: document.querySelector("#stability-max-slider"),
   stabilityMaxValue: document.querySelector("#stability-max-value"),
   goodPairsMinSlider: document.querySelector("#good-pairs-min-slider"),
@@ -121,6 +127,7 @@ const layerText = {
   velocity: { title: "Velocity" },
   deformation: { title: "Deformation" },
   coherence: { title: "Coherence" },
+  rmse: { title: "RMSE" },
 };
 
 const HEATMAP_PALETTES = {
@@ -324,6 +331,7 @@ function getLayerValues(layer = state.activeLayer) {
   if (!state.data || !layer) return null;
   if (layer === "velocity") return state.data.layers.velocity.values;
   if (layer === "coherence") return getCoherenceValues();
+  if (layer === "rmse") return state.data.layers.rmse.values;
   if (layer === "deformation") return getDeformationValues();
   return null;
 }
@@ -363,6 +371,7 @@ function getLayerRange(layer = state.activeLayer) {
   if (!state.data || !layer) return { min: null, max: null, p02: null, p98: null };
   if (layer === "velocity") return state.data.layers.velocity.range;
   if (layer === "coherence") return state.data.layers.coherence.range;
+  if (layer === "rmse") return state.data.layers.rmse.range;
   return state.data.layers.deformation.range;
 }
 
@@ -370,6 +379,9 @@ function getDisplayRange(layer = state.activeLayer, values = getLayerValues(laye
   if (!state.data || !layer || !values) return getLayerRange(layer);
   if (layer === "coherence") {
     return state.data.layers.coherence.range;
+  }
+  if (layer === "rmse") {
+    return state.data.layers.rmse.range;
   }
 
   const scaleValues = getScaleValues(layer, values);
@@ -575,6 +587,10 @@ function isFilterableLayer(layer = state.activeLayer) {
   return layer === "velocity" || layer === "deformation";
 }
 
+function isDiagnosticLayer(layer = state.activeLayer) {
+  return layer === "coherence" || layer === "rmse";
+}
+
 function totalPairCount() {
   return state.data?.layers.n_good_pairs.n_pairs_total ?? 0;
 }
@@ -588,25 +604,76 @@ function defaultGoodPairMinimum() {
 function initializeFilterThresholds() {
   if (state.filterInitialized) return;
   state.qualityThresholds.goodPairs = defaultGoodPairMinimum();
+  state.qualityThresholds.rmse = defaultRmseThreshold();
   state.filterInitialized = true;
+}
+
+function hasLayerValues(layer) {
+  return Boolean(state.data?.layers?.[layer]?.values);
+}
+
+function defaultRmseThreshold() {
+  const range = state.data?.layers.rmse?.range;
+  return range?.p98 ?? range?.max ?? 50;
+}
+
+function qualityValue(layer, row, col) {
+  return state.data?.layers?.[layer]?.values?.[row]?.[col] ?? null;
 }
 
 function pixelPassesFilter(row, col) {
   if (!state.data) return false;
 
   const thresholds = state.qualityThresholds;
-  const coherence = state.data.layers.coherence.values[row][col];
-  const stability = state.data.layers.coherence_stability.values[row][col];
-  const goodPairs = state.data.layers.n_good_pairs.values[row][col];
-  return coherence !== null
-    && stability !== null
-    && goodPairs !== null
-    && coherence >= thresholds.coherence
-    && stability <= thresholds.stability
-    && goodPairs >= thresholds.goodPairs;
+  const coherence = qualityValue("coherence", row, col);
+  const rmse = qualityValue("rmse", row, col);
+  const velocity = qualityValue("velocity", row, col);
+  const stability = qualityValue("coherence_stability", row, col);
+  const goodPairs = qualityValue("n_good_pairs", row, col);
+  const landmask = qualityValue("landmask", row, col);
+
+  if (landmask !== null && Number(landmask) <= 0) return false;
+  if (coherence !== null && coherence < thresholds.coherence) return false;
+  if (rmse !== null && thresholds.rmse !== null && rmse > thresholds.rmse) return false;
+  if (thresholds.significantOnly && rmse !== null && velocity !== null && Math.abs(velocity) <= 2 * rmse) return false;
+  if (stability !== null && stability > thresholds.stability) return false;
+  if (goodPairs !== null && goodPairs < thresholds.goodPairs) return false;
+  return true;
 }
 
-function visiblePixelSummary(values = getLayerValues()) {
+function visiblePixelSummary(values = getLayerValues(), sampleLimit = 25000) {
+  if (!state.data || !values) return { visible: 0, total: 0, percent: 0 };
+
+  let visible = 0;
+  const rows = values.length;
+  const cols = values[0]?.length ?? 0;
+  const total = rows * cols;
+  const step = Math.max(1, Math.floor(total / sampleLimit));
+  let sampled = 0;
+
+  for (let linearIndex = 0; linearIndex < total; linearIndex += step) {
+    const row = Math.floor(linearIndex / cols);
+    const col = linearIndex % cols;
+    sampled += 1;
+    const value = values[row][col];
+    if (
+      value !== null
+      && !Number.isNaN(value)
+      && pixelPassesFilter(row, col)
+    ) {
+      visible += 1;
+    }
+  }
+
+  const visibleEstimate = sampled ? Math.round((visible / sampled) * total) : 0;
+  return {
+    visible: visibleEstimate,
+    total,
+    percent: total ? Math.round((visibleEstimate / total) * 100) : 0,
+  };
+}
+
+function exactVisiblePixelSummary(values = getLayerValues()) {
   if (!state.data || !values) return { visible: 0, total: 0, percent: 0 };
 
   let visible = 0;
@@ -645,6 +712,20 @@ function colorInfoForValue(value, range, layer) {
     const t = clamp(value, 0, 1);
     const color = colorFromPalette(t, COHERENCE_LEGEND_COLORS);
     return { color: [...color, 255], t, isOver: false, isUnder: false };
+  }
+
+  if (layer === "rmse") {
+    const min = range.min ?? 0;
+    const max = range.p98 ?? range.max ?? 1;
+    const t = max === min ? 0.5 : clamp((value - min) / (max - min), 0, 1);
+    const color = colorFromPalette(t, [
+      [245, 247, 250],
+      [192, 205, 220],
+      [120, 139, 163],
+      [74, 85, 104],
+      [32, 39, 52],
+    ]);
+    return { color: [...color, 255], t, isOver: value > max, isUnder: value < min };
   }
 
   const scale = range.scale ?? {
@@ -896,9 +977,9 @@ function createRasterGridLayer() {
     pane: "insarRasterPane",
     tileSize: 256,
     opacity: 1,
-    updateWhenIdle: false,
-    updateWhenZooming: true,
-    keepBuffer: 6,
+    updateWhenIdle: true,
+    updateWhenZooming: false,
+    keepBuffer: 1,
   });
 }
 
@@ -950,28 +1031,41 @@ function strokePixelShape(ctx, centerX, centerY, width, height) {
 
 function drawRasterTile(ctx, coords, tileSize) {
   if (!state.data || !state.activeLayer || !state.rasterValues || !state.rasterRange) return;
-  if (state.rasterRange.p02 === null && state.activeLayer !== "coherence") return;
+  if (state.rasterRange.p02 === null && !isDiagnosticLayer()) return;
 
   const values = state.rasterValues;
-  const latEdges = axisEdges(state.data.lat);
-  const lonEdges = axisEdges(state.data.lon);
+  const grid = getGridCache();
   const tileOrigin = L.point(coords.x * tileSize.x, coords.y * tileSize.y);
   const tileBounds = L.bounds(tileOrigin, tileOrigin.add(tileSize));
+  const tileNorthWest = state.map.unproject(tileOrigin, coords.z);
+  const tileSouthEast = state.map.unproject(tileOrigin.add(tileSize), coords.z);
+  const padLat = grid.latStepAbs * 2;
+  const padLon = grid.lonStepAbs * 2;
+  const rowRange = axisIndexRange(
+    grid.lat,
+    Math.min(tileNorthWest.lat, tileSouthEast.lat) - padLat,
+    Math.max(tileNorthWest.lat, tileSouthEast.lat) + padLat,
+  );
+  const colRange = axisIndexRange(
+    grid.lon,
+    Math.min(tileNorthWest.lng, tileSouthEast.lng) - padLon,
+    Math.max(tileNorthWest.lng, tileSouthEast.lng) + padLon,
+  );
 
-  for (let row = 0; row < values.length; row += 1) {
-    const south = Math.min(latEdges[row], latEdges[row + 1]);
-    const north = Math.max(latEdges[row], latEdges[row + 1]);
+  for (let row = rowRange.start; row <= rowRange.end; row += 1) {
+    const south = Math.min(grid.latEdges[row], grid.latEdges[row + 1]);
+    const north = Math.max(grid.latEdges[row], grid.latEdges[row + 1]);
 
-    for (let col = 0; col < values[row].length; col += 1) {
+    for (let col = colRange.start; col <= colRange.end; col += 1) {
       const value = values[row][col];
       const hiddenByFilter = isFilterableLayer() && !pixelPassesFilter(row, col);
 
       if (hiddenByFilter || value === null || Number.isNaN(value)) continue;
 
-      const centerLat = state.data.lat[row];
-      const centerLon = state.data.lon[col];
-      const west = Math.min(lonEdges[col], lonEdges[col + 1]);
-      const east = Math.max(lonEdges[col], lonEdges[col + 1]);
+      const centerLat = grid.lat[row];
+      const centerLon = grid.lon[col];
+      const west = Math.min(grid.lonEdges[col], grid.lonEdges[col + 1]);
+      const east = Math.max(grid.lonEdges[col], grid.lonEdges[col + 1]);
       const northWest = state.map.project([north, west], coords.z);
       const southEast = state.map.project([south, east], coords.z);
       const cellWidth = Math.max(1, southEast.x - northWest.x);
@@ -994,6 +1088,74 @@ function drawRasterTile(ctx, coords, tileSize) {
       drawPixelShape(ctx, centerX, centerY, footprint.width, footprint.height);
     }
   }
+}
+
+function getGridCache() {
+  if (state.gridCache && state.gridCache.lat === state.data.lat && state.gridCache.lon === state.data.lon) {
+    return state.gridCache;
+  }
+  const lat = state.data.lat;
+  const lon = state.data.lon;
+  const latEdges = axisEdges(lat);
+  const lonEdges = axisEdges(lon);
+  state.gridCache = {
+    lat,
+    lon,
+    latEdges,
+    lonEdges,
+    latAscending: lat[0] <= lat[lat.length - 1],
+    lonAscending: lon[0] <= lon[lon.length - 1],
+    latStepAbs: medianStepAbs(lat),
+    lonStepAbs: medianStepAbs(lon),
+  };
+  return state.gridCache;
+}
+
+function medianStepAbs(values) {
+  if (!values || values.length < 2) return 0;
+  const steps = [];
+  const sampleStep = Math.max(1, Math.floor(values.length / 200));
+  for (let index = sampleStep; index < values.length; index += sampleStep) {
+    steps.push(Math.abs(values[index] - values[index - sampleStep]) / sampleStep);
+  }
+  return median(steps) ?? Math.abs(values[1] - values[0]) ?? 0;
+}
+
+function axisIndexRange(values, minValue, maxValue) {
+  if (!values?.length) return { start: 0, end: -1 };
+  const ascending = values[0] <= values[values.length - 1];
+  const lower = ascending ? minValue : maxValue;
+  const upper = ascending ? maxValue : minValue;
+  let start = lowerBound(values, lower, ascending) - 1;
+  let end = upperBound(values, upper, ascending) + 1;
+  start = clamp(start, 0, values.length - 1);
+  end = clamp(end, 0, values.length - 1);
+  if (start > end) return { start: 0, end: -1 };
+  return { start, end };
+}
+
+function lowerBound(values, target, ascending) {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    const before = ascending ? values[mid] < target : values[mid] > target;
+    if (before) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+function upperBound(values, target, ascending) {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    const beforeOrEqual = ascending ? values[mid] <= target : values[mid] >= target;
+    if (beforeOrEqual) low = mid + 1;
+    else high = mid;
+  }
+  return low - 1;
 }
 
 function axisEdges(values) {
@@ -2248,9 +2410,16 @@ function syncQualityControls() {
   const thresholds = state.qualityThresholds;
   const totalPairs = totalPairCount();
   const goodPairSliderMax = totalPairs || Math.max(12, thresholds.goodPairs);
+  const rmseRange = state.data?.layers.rmse?.range;
+  const rmseMax = Math.max(rmseRange?.max ?? thresholds.rmse ?? 50, 0.1);
+  if (thresholds.rmse === null) thresholds.rmse = defaultRmseThreshold();
 
   els.coherenceThresholdSlider.value = thresholds.coherence.toFixed(2);
   els.coherenceThresholdValue.textContent = thresholds.coherence.toFixed(2);
+  els.rmseThresholdSlider.max = String(Math.ceil(rmseMax * 10) / 10);
+  els.rmseThresholdSlider.value = String(thresholds.rmse ?? rmseMax);
+  els.rmseThresholdValue.textContent = `${formatNumber(thresholds.rmse ?? rmseMax, 1)} mm`;
+  els.significantOnlyToggle.checked = Boolean(thresholds.significantOnly);
   els.stabilityMaxSlider.value = thresholds.stability.toFixed(2);
   els.stabilityMaxValue.textContent = thresholds.stability.toFixed(2);
   els.goodPairsMinSlider.max = String(goodPairSliderMax);
@@ -2263,7 +2432,7 @@ function syncQualityControls() {
 function updateControls() {
   els.datasetOptions.forEach((option) => {
     const isSelected = option.dataset.layer === state.selectedLayer;
-    option.hidden = false;
+    option.hidden = state.data ? !hasLayerValues(option.dataset.layer) : false;
     option.classList.toggle("active", isSelected);
     option.setAttribute("aria-selected", String(isSelected));
     option.dataset.activeLayer = String(option.dataset.layer === state.activeLayer);
@@ -2273,6 +2442,8 @@ function updateControls() {
   els.datePanel.hidden = state.activeLayer !== "deformation" || !state.data;
   els.coherencePairPanel.hidden = state.activeLayer !== "coherence" || !state.data;
   els.filterPanel.hidden = !isFilterableLayer();
+  els.stabilityMaxSlider.closest(".advanced-control").hidden = !hasLayerValues("coherence_stability");
+  els.goodPairsMinSlider.closest(".advanced-control").hidden = !hasLayerValues("n_good_pairs");
   syncQualityControls();
   updateStatusFooter();
   updateAppTitle();
@@ -2359,7 +2530,15 @@ function updateStatusFooter() {
 
 function updateAppTitle() {
   const projectName = state.data ? projectFolderName(state.data.project.project_path) : "No project loaded";
-  els.appTitle.textContent = `InSAR SBAS Viewer - ${projectName}`;
+  const context = state.data ? formatMethodGeometry(state.data.meta) : "Viewer";
+  els.appTitle.textContent = `InSAR ${context} - ${projectName}`;
+}
+
+function formatMethodGeometry(meta = {}) {
+  const method = (meta.method || "InSAR").toString().toUpperCase();
+  const orbit = meta.orbit ? `, ${meta.orbit.toString().toLowerCase()}` : "";
+  const geometry = meta.geometry ? `${meta.geometry}${orbit}` : `LOS${orbit}`;
+  return `${method} - ${geometry}`;
 }
 
 function formatDateTime(value) {
@@ -2388,6 +2567,12 @@ function updateLegend() {
     els.legendTitle.textContent = "Coherence";
     els.legendSubtitle.textContent = getCoherenceStackKind() === "pair" ? "pair reliability" : "median reliability";
     renderLegendRows(buildLegendBins(0, 1, COHERENCE_LEGEND_COLORS.length), "unitless", state.activeLayer, renderRange);
+    return;
+  }
+  if (state.activeLayer === "rmse") {
+    els.legendTitle.textContent = "RMSE (mm)";
+    els.legendSubtitle.textContent = "diagnostic uncertainty map";
+    renderContinuousLegend(renderRange, "mm", state.activeLayer);
     return;
   }
 
@@ -2458,6 +2643,11 @@ function renderLegendRows(bins, unit, layer, renderRange) {
 }
 
 function renderContinuousLegend(range, unit, layer) {
+  if (layer === "rmse") {
+    renderPositiveLegend(range, unit, layer);
+    return;
+  }
+
   const scale = range.scale ?? {
     mode: "symlog",
     negExtent: Math.abs(range.min ?? range.p02 ?? 0),
@@ -2489,6 +2679,40 @@ function renderContinuousLegend(range, unit, layer) {
   });
 
   const marker = renderNormalizedLegendMarker(getSelectedLegendValue(), scale, unit);
+  wrap.append(gradient, ticks);
+  if (marker) wrap.appendChild(marker);
+  els.legendItems.replaceChildren(wrap);
+}
+
+function renderPositiveLegend(range, unit, layer) {
+  const min = range.min ?? 0;
+  const max = range.p98 ?? range.max ?? 1;
+  const wrap = document.createElement("div");
+  wrap.className = "map-legend-continuous";
+
+  const gradient = document.createElement("div");
+  gradient.className = "map-legend-gradient";
+  const stops = [];
+  for (let index = 0; index <= 16; index += 1) {
+    const percent = (index / 16) * 100;
+    const value = min + (max - min) * (index / 16);
+    stops.push(`${rgbCss(colorForValue(value, range, layer))} ${percent}%`);
+  }
+  gradient.style.background = `linear-gradient(90deg, ${stops.join(", ")})`;
+
+  const ticks = document.createElement("div");
+  ticks.className = "map-legend-ticks";
+  [min, (min + max) / 2, max].forEach((value, index) => {
+    const tick = document.createElement("span");
+    tick.textContent = formatLegendNumber(value);
+    tick.title = unit;
+    tick.style.left = `${index * 50}%`;
+    if (index === 0) tick.dataset.edge = "start";
+    if (index === 2) tick.dataset.edge = "end";
+    ticks.appendChild(tick);
+  });
+
+  const marker = renderLegendMarker(getSelectedLegendValue(), min, max, unit);
   wrap.append(gradient, ticks);
   if (marker) wrap.appendChild(marker);
   els.legendItems.replaceChildren(wrap);
@@ -2626,10 +2850,10 @@ function updatePixelInfo() {
   const coherence = state.activeLayer === "coherence"
     ? getCoherenceValues()?.[row]?.[col]
     : state.data.layers.coherence.values[row][col];
-  const stability = state.data.layers.coherence_stability.values[row][col];
-  const goodPairs = state.data.layers.n_good_pairs.values[row][col];
-  const totalPairs = state.data.layers.n_good_pairs.n_pairs_total;
-  const rmse = state.data.layers.rmse.values[row][col];
+  const stability = qualityValue("coherence_stability", row, col);
+  const goodPairs = qualityValue("n_good_pairs", row, col);
+  const totalPairs = state.data.layers.n_good_pairs?.n_pairs_total ?? 0;
+  const rmse = qualityValue("rmse", row, col);
   const deformation = state.data.layers.deformation.values[state.dateIndex][row][col];
   const elevation = getElevation(row, col);
   const passes = pixelPassesFilter(row, col);
@@ -2637,12 +2861,14 @@ function updatePixelInfo() {
   els.pixelLat.textContent = formatNumber(state.data.lat[row], 6);
   els.pixelLon.textContent = formatNumber(state.data.lon[col], 6);
   els.pixelElevation.textContent = hasTerrainDem() ? `${formatNumber(elevation, 1)} m` : "n/a";
-  els.pixelVelocity.textContent = `${formatNumber(velocity)} mm/year`;
+  els.pixelVelocity.textContent = rmse === null
+    ? `${formatNumber(velocity)} mm/year`
+    : `${formatNumber(velocity)} mm/year +/- ${formatNumber(rmse, 2)} mm`;
   els.pixelCoherenceLabel.innerHTML = `${state.activeLayer === "coherence" ? "Pair coherence" : "Median coherence"} <span class="metric-hint">high = good</span>`;
   els.pixelCoherence.textContent = formatNumber(coherence, 2);
-  els.pixelStability.textContent = formatNumber(stability, 2);
-  els.pixelGoodPairs.textContent = `${formatNumber(goodPairs, 0)} / ${totalPairs}`;
-  els.pixelRmse.textContent = `${formatNumber(rmse, 2)} mm`;
+  els.pixelStability.textContent = stability === null ? "n/a" : formatNumber(stability, 2);
+  els.pixelGoodPairs.textContent = totalPairs ? `${formatNumber(goodPairs, 0)} / ${totalPairs}` : "n/a";
+  els.pixelRmse.textContent = rmse === null ? "n/a" : `${formatNumber(rmse, 2)} mm`;
   els.pixelDeformation.textContent = `${formatNumber(deformation)} mm`;
   els.pixelPasses.textContent = isFilterableLayer() ? (passes ? "Yes" : "No") : "Not applied";
   els.pixelPanelSubtitle.textContent = `${formatNumber(state.data.lat[row], 5)}, ${formatNumber(state.data.lon[col], 5)}`;
@@ -2687,7 +2913,9 @@ function drawTimeSeries() {
     return;
   }
 
-  const values = state.data.layers.deformation.values.map((plane) => plane[state.selectedPixel.row][state.selectedPixel.col]);
+  const { row, col } = state.selectedPixel;
+  const values = state.data.layers.deformation.values.map((plane) => plane[row][col]);
+  const rmse = qualityValue("rmse", row, col);
   const valid = values.filter((value) => value !== null && !Number.isNaN(value));
   if (!valid.length) {
     ctx.fillStyle = "#627083";
@@ -2695,7 +2923,7 @@ function drawTimeSeries() {
     return;
   }
 
-  const maxAbs = Math.max(...valid.map((value) => Math.abs(value)), 0.000001);
+  const maxAbs = Math.max(...valid.map((value) => Math.abs(value) + (rmse ?? 0)), 0.000001);
   const xForIndex = (index) => padding + (values.length === 1 ? width / 2 : (index / (values.length - 1)) * width);
   const yForValue = (value) => padding + height / 2 - (value / maxAbs) * (height / 2);
 
@@ -2704,6 +2932,25 @@ function drawTimeSeries() {
   ctx.moveTo(padding, padding + height / 2);
   ctx.lineTo(padding + width, padding + height / 2);
   ctx.stroke();
+
+  if (rmse !== null) {
+    ctx.fillStyle = "rgba(252, 217, 0, 0.22)";
+    ctx.beginPath();
+    values.forEach((value, index) => {
+      if (value === null || Number.isNaN(value)) return;
+      const x = xForIndex(index);
+      const y = yForValue(value + rmse);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    [...values].reverse().forEach((value, reverseIndex) => {
+      if (value === null || Number.isNaN(value)) return;
+      const index = values.length - 1 - reverseIndex;
+      ctx.lineTo(xForIndex(index), yForValue(value - rmse));
+    });
+    ctx.closePath();
+    ctx.fill();
+  }
 
   ctx.strokeStyle = "#176b87";
   ctx.lineWidth = Math.max(2, 2 * (window.devicePixelRatio || 1));
@@ -2751,7 +2998,7 @@ function renderDatasetDetails() {
   const project = state.data.project;
   const bounds = project.bounds;
   els.datasetProjectLabel.textContent = `Project: ${projectFolderName(project.project_path)}`;
-  els.datasetFile.textContent = project.dataset_file;
+  els.datasetFile.textContent = `${project.dataset_file} (${formatMethodGeometry(state.data.meta)})`;
   els.gridDetails.textContent = `${project.lat_count} rows x ${project.lon_count} columns, ${project.date_count} dates`;
   els.boundsDetails.textContent = `${formatNumber(bounds.lat_min, 5)} to ${formatNumber(bounds.lat_max, 5)} lat; ${formatNumber(bounds.lon_min, 5)} to ${formatNumber(bounds.lon_max, 5)} lon`;
 }
@@ -2766,6 +3013,8 @@ function initializeLoadedProjectState() {
   state.dateIndex = Math.max(0, state.data.dates.length - 1);
   state.coherencePairIndex = 0;
   state.selectedPixel = null;
+  state.selectedLayer = hasLayerValues("velocity") ? "velocity" : null;
+  state.activeLayer = state.selectedLayer;
 }
 
 async function loadProject(projectPath = "") {
@@ -3178,19 +3427,31 @@ els.coherencePairNext.addEventListener("click", () => {
 
 els.coherenceThresholdSlider.addEventListener("input", () => {
   state.qualityThresholds.coherence = Number(els.coherenceThresholdSlider.value);
-  updateControls();
+  syncQualityControls();
+  drawMap();
+});
+
+els.rmseThresholdSlider.addEventListener("input", () => {
+  state.qualityThresholds.rmse = Number(els.rmseThresholdSlider.value);
+  syncQualityControls();
+  drawMap();
+});
+
+els.significantOnlyToggle.addEventListener("change", () => {
+  state.qualityThresholds.significantOnly = els.significantOnlyToggle.checked;
+  syncQualityControls();
   drawMap();
 });
 
 els.stabilityMaxSlider.addEventListener("input", () => {
   state.qualityThresholds.stability = Number(els.stabilityMaxSlider.value);
-  updateControls();
+  syncQualityControls();
   drawMap();
 });
 
 els.goodPairsMinSlider.addEventListener("input", () => {
   state.qualityThresholds.goodPairs = Number(els.goodPairsMinSlider.value);
-  updateControls();
+  syncQualityControls();
   drawMap();
 });
 
@@ -3377,6 +3638,7 @@ function resetMapLayers() {
   state.hasFitProjectBounds = false;
   state.rasterValues = null;
   state.rasterRange = null;
+  state.gridCache = null;
   if (state.rasterLayer) {
     state.rasterLayer.remove();
     state.rasterLayer = null;
@@ -3391,4 +3653,4 @@ updateControls();
 initializeFloatingPanel();
 drawMap();
 drawTimeSeries();
-setStatus("");
+loadProject("__CURRENT__");

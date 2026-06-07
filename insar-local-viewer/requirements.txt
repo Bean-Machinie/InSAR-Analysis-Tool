@@ -2,3 +2,5 @@ flask
 xarray
 netCDF4
 numpy
+h5netcdf
+h5py

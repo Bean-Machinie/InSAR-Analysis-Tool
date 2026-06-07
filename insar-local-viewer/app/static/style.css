@@ -699,6 +699,30 @@ button:active {
   margin-top: 16px;
 }
 
+.toggle-control {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  margin-top: 14px;
+}
+
+.toggle-control input {
+  accent-color: var(--accent);
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.toggle-control span {
+  color: var(--sidebar-text);
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .map-panel {
   background: #f0f0ec;
   border: 0;

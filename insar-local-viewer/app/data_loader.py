@@ -4,6 +4,9 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+import folder_loader
+
+# (folder-format support lives in folder_loader; builders are at end of file)
 
 NETCDF_PRIORITY = [
     "results_tight.nc",
@@ -87,6 +90,9 @@ def open_dataset(project_dir: Path):
 
 
 def get_project_info(project_dir: Path) -> dict:
+    if folder_loader.is_folder_project(project_dir):
+        return _folder_project_info(folder_loader.load_folder_project(project_dir))
+
     selected_file, dataset = open_dataset(project_dir)
     try:
         resolved_project_dir = selected_file.parent
@@ -119,6 +125,9 @@ def get_project_info(project_dir: Path) -> dict:
 
 
 def get_map_data(project_dir: Path) -> dict:
+    if folder_loader.is_folder_project(project_dir):
+        return _folder_map_data(folder_loader.load_folder_project(project_dir))
+
     selected_file, dataset = open_dataset(project_dir)
     try:
         resolved_project_dir = selected_file.parent
@@ -159,6 +168,7 @@ def get_map_data(project_dir: Path) -> dict:
                 "pixel_footprint_m": _pixel_footprints_m(resolved_project_dir),
                 "last_updated": _project_last_updated(resolved_project_dir),
             },
+            "meta": _single_file_meta(resolved_project_dir),
             "dates": dates,
             "lat": _axis_to_json(lat),
             "lon": _axis_to_json(lon),
@@ -184,6 +194,7 @@ def get_map_data(project_dir: Path) -> dict:
                 },
                 "rmse": {
                     "values": _array_to_json(rmse),
+                    "range": _robust_range(np.abs(rmse)),
                     "unit": "mm",
                 },
                 "coherence_stability": {
@@ -459,3 +470,216 @@ def _robust_range(values, center_zero=False):
 def _finite_float(value):
     value = float(value)
     return value if np.isfinite(value) else None
+
+
+# ---------------------------------------------------------------------------
+# Folder-format (manifest-driven) payload builders.
+#
+# These produce exactly the same JSON shape the browser already consumes for
+# the single-file loader, so the view code is source-agnostic. Layers that the
+# folder format does not carry (coherence_stability, n_good_pairs, terrain,
+# coherence pair stack) are emitted as explicit nulls; the frontend treats
+# those as "not available" rather than erroring.
+# ---------------------------------------------------------------------------
+
+def _single_file_meta(project_dir: Path) -> dict:
+    metadata = _read_project_metadata(project_dir)
+    sbas_meta = metadata.get("sbas_results_metadata.json", {}) or {}
+    product = sbas_meta.get("product", {}) or {}
+    return {
+        "source_format": "single-file",
+        "method": sbas_meta.get("method") or "sbas",
+        "geometry": product.get("geometry") or "line-of-sight (LOS)",
+        "orbit": (sbas_meta.get("acquisition", {}) or {}).get("orbit"),
+        "subswath": (sbas_meta.get("acquisition", {}) or {}).get("subswath"),
+        "polarization": (sbas_meta.get("acquisition", {}) or {}).get("polarization"),
+        "reference_date": (sbas_meta.get("acquisition", {}) or {}).get("reference_date"),
+        "units": {},
+        "available_layers": [],
+    }
+
+
+def _folder_grid(model: dict):
+    for key in ("velocity", "coherence", "rmse", "displacement", "landmask"):
+        data_array = model["layers"].get(key)
+        if data_array is not None and "lat" in data_array.coords and "lon" in data_array.coords:
+            lat = np.asarray(data_array.coords["lat"].values, dtype=float)
+            lon = np.asarray(data_array.coords["lon"].values, dtype=float)
+            return lat, lon
+    raise ProjectDataError("No folder layer carries lat/lon coordinates")
+
+
+def _folder_2d(model: dict, key: str):
+    data_array = model["layers"].get(key)
+    if data_array is None:
+        return None
+    if set(data_array.dims) != {"lat", "lon"}:
+        raise ProjectDataError(f"Expected folder layer '{key}' to be a 2D lat/lon map")
+    return np.asarray(data_array.transpose("lat", "lon").values, dtype=float)
+
+
+def _folder_3d(model: dict, key: str):
+    data_array = model["layers"].get(key)
+    if data_array is None:
+        return None
+    if set(data_array.dims) != {"date", "lat", "lon"}:
+        raise ProjectDataError(f"Expected folder layer '{key}' to be a 3D date/lat/lon cube")
+    return np.asarray(data_array.transpose("date", "lat", "lon").values, dtype=float)
+
+
+def _folder_meta(model: dict) -> dict:
+    acquisition = model.get("acquisition", {}) or {}
+    return {
+        "source_format": "folder",
+        "method": model.get("method"),
+        "geometry": model.get("geometry"),
+        "orbit": acquisition.get("orbit"),
+        "subswath": acquisition.get("subswath"),
+        "polarization": acquisition.get("polarization"),
+        "reference_date": acquisition.get("reference_date"),
+        "units": model.get("units", {}),
+        "available_layers": sorted(model["layers"].keys()),
+        "missing_layers": model.get("missing", []),
+    }
+
+
+def _folder_project_info(model: dict) -> dict:
+    lat, lon = _folder_grid(model)
+    dates = model["dates"]
+    layers = model["layers"]
+    return {
+        "project_path": str(model["root"]),
+        "selected_file": str(model["manifest_path"]),
+        "dataset_file": model["manifest_path"].name,
+        "products": {
+            "velocity": "velocity" in layers,
+            "deformation": "displacement" in layers,
+            "coherence": "coherence" in layers,
+            "terrain": False,
+        },
+        "lat_count": int(lat.size),
+        "lon_count": int(lon.size),
+        "date_count": int(len(dates)),
+        "dates": dates,
+        "bounds": _bounds(lat, lon),
+        "pixel_footprint_m": _folder_pixel_footprint(model),
+        "metadata": {"metadata.json": model["manifest"]},
+        "meta": _folder_meta(model),
+    }
+
+
+def _folder_pixel_footprint(model: dict) -> dict:
+    resolution = (model.get("processing", {}) or {}).get("resolution_m")
+    try:
+        size = float(resolution)
+    except (TypeError, ValueError):
+        size = None
+    return {
+        "sbas": {
+            "width_m": size,
+            "height_m": size,
+            "coarsen": [1, 1],
+            "source": "manifest_resolution_m",
+        },
+    }
+
+
+def _folder_map_data(model: dict) -> dict:
+    lat, lon = _folder_grid(model)
+    dates = model["dates"]
+    units = model.get("units", {})
+
+    velocity = _folder_2d(model, "velocity")
+    coherence = _folder_2d(model, "coherence")
+    rmse = _folder_2d(model, "rmse")
+    displacement = _folder_3d(model, "displacement")
+    landmask = _folder_2d(model, "landmask")
+
+    # Velocity and the displacement cube are the two display layers; both are
+    # required for a meaningful viewer. Quality layers are optional.
+    if velocity is None:
+        raise ProjectDataError("Required product is not available: velocity")
+    if displacement is None:
+        raise ProjectDataError("Required product is not available: deformation")
+    if coherence is None:
+        raise ProjectDataError("Required product is not available: coherence")
+
+    return {
+        "project": {
+            "project_path": str(model["root"]),
+            "selected_file": str(model["manifest_path"]),
+            "dataset_file": model["manifest_path"].name,
+            "lat_count": int(lat.size),
+            "lon_count": int(lon.size),
+            "date_count": int(len(dates)),
+            "bounds": _bounds(lat, lon),
+            "pixel_footprint_m": _folder_pixel_footprint(model),
+            "last_updated": (model.get("acquisition", {}) or {}).get("reference_date"),
+        },
+        "meta": _folder_meta(model),
+        "dates": dates,
+        "lat": _axis_to_json(lat),
+        "lon": _axis_to_json(lon),
+        "layers": {
+            "velocity": {
+                "values": _array_to_json(velocity),
+                "range": _robust_range(velocity, center_zero=True),
+                "unit": units.get("velocity", "mm/year"),
+            },
+            "deformation": {
+                "values": _array_to_json(displacement),
+                "range": _robust_range(displacement, center_zero=True),
+                "unit": units.get("displacement", "mm"),
+            },
+            "coherence": {
+                "values": _array_to_json(coherence),
+                "stack": None,
+                "pairs": [],
+                "pair_baselines_days": [],
+                "stack_kind": "summary",
+                "range": {"min": 0.0, "max": 1.0, "p02": 0.0, "p98": 1.0},
+                "unit": units.get("coherence", "unitless"),
+            },
+            "rmse": {
+                "values": _array_to_json(rmse) if rmse is not None else None,
+                "range": _robust_range(rmse) if rmse is not None else {"min": None, "max": None, "p02": None, "p98": None},
+                "unit": units.get("rmse", "mm"),
+            },
+            "coherence_stability": {"values": None, "unit": "unitless"},
+            "n_good_pairs": {"values": None, "unit": "count", "n_pairs_total": 0},
+            "terrain": {
+                "values": None,
+                "range": {"min": None, "max": None, "p02": None, "p98": None},
+                "unit": "m",
+                "source": "not-available",
+            },
+            "landmask": {
+                "values": _array_to_json(landmask) if landmask is not None else None,
+                "unit": "0/1",
+            },
+        },
+    }
+
+
+def get_pixel(project_dir: Path, lat: float, lon: float) -> dict:
+    """Geographic pixel inspection via the folder-loader helpers.
+
+    Returns velocity (+/- rmse) and the displacement time series for the pixel
+    nearest to (lat, lon). Folder-format only; the single-file path performs
+    pixel inspection client-side from the already-loaded arrays.
+    """
+    if not folder_loader.is_folder_project(project_dir):
+        raise ProjectDataError("Pixel endpoint is only available for folder-format projects")
+
+    model = folder_loader.load_folder_project(project_dir)
+    series_dates, series_values = folder_loader.series_at(model, lat, lon)
+    return {
+        "lat": float(lat),
+        "lon": float(lon),
+        "velocity": folder_loader.value_at(model, "velocity", lat, lon),
+        "rmse": folder_loader.value_at(model, "rmse", lat, lon),
+        "coherence": folder_loader.value_at(model, "coherence", lat, lon),
+        "dates": series_dates,
+        "displacement": series_values,
+        "unit": model.get("units", {}),
+    }

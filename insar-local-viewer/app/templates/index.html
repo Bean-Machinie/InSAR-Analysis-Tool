@@ -157,6 +157,10 @@
                     <span class="option-text">Coherence</span>
                     <span class="option-check" aria-hidden="true"></span>
                   </button>
+                  <button class="select-option" type="button" role="option" aria-selected="false" data-layer="rmse">
+                    <span class="option-text">RMSE</span>
+                    <span class="option-check" aria-hidden="true"></span>
+                  </button>
                 </div>
               </div>
             </section>
@@ -168,6 +172,15 @@
                 <input id="coherence-threshold-slider" type="range" min="0" max="1" value="0.3" step="0.01">
                 <div class="control-value">Minimum: <span id="coherence-threshold-value">0.30</span></div>
               </div>
+              <div class="advanced-control">
+                <label for="rmse-threshold-slider">RMSE</label>
+                <input id="rmse-threshold-slider" type="range" min="0" max="50" value="50" step="0.1">
+                <div class="control-value">Maximum: <span id="rmse-threshold-value">50.0 mm</span></div>
+              </div>
+              <label class="toggle-control">
+                <input id="significant-only-toggle" type="checkbox">
+                <span>Significant only</span>
+              </label>
               <div class="advanced-control">
                 <label for="stability-max-slider">Stability (std)</label>
                 <input id="stability-max-slider" type="range" min="0" max="0.5" value="0.18" step="0.01">

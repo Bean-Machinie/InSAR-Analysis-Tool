@@ -7,12 +7,16 @@ from data_loader import (
     ProjectDataError,
     get_layer_summary,
     get_map_data,
+    get_pixel,
     get_project_info,
 )
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_PROJECT_DIR = BASE_DIR / "data" / "project_D"
+WORKSPACE_DIR = BASE_DIR.parent
+DEFAULT_PROJECT_DIR = WORKSPACE_DIR / "Data" / "insar_results"
+if not DEFAULT_PROJECT_DIR.exists():
+    DEFAULT_PROJECT_DIR = BASE_DIR / "data" / "project_D"
 
 app = Flask(__name__)
 app.config["PROJECT_DIR"] = DEFAULT_PROJECT_DIR
@@ -72,6 +76,16 @@ def project_info():
 @app.route("/api/map-data")
 def map_data():
     return _json_response(lambda: get_map_data(_current_project_dir()))
+
+
+@app.route("/api/pixel")
+def pixel():
+    try:
+        lat = float(request.args.get("lat", ""))
+        lon = float(request.args.get("lon", ""))
+    except ValueError:
+        return jsonify({"error": "Query parameters 'lat' and 'lon' must be numbers"}), 400
+    return _json_response(lambda: get_pixel(_current_project_dir(), lat, lon))
 
 
 @app.route("/api/layer-summary")
