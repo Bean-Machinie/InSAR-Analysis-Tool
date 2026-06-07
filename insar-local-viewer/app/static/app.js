@@ -2,7 +2,6 @@ const state = {
   data: null,
   activeLayer: null,
   selectedLayer: null,
-  psLayer: null,
   dateIndex: 0,
   coherencePairIndex: 0,
   qualityThresholds: {
@@ -12,13 +11,10 @@ const state = {
   },
   filterInitialized: false,
   selectedPixel: null,
-  selectedPsPoint: null,
   map: null,
   rasterLayer: null,
-  psPointLayer: null,
   rasterValues: null,
   rasterRange: null,
-  psRange: null,
   selectedPixelLayer: null,
   hasFitProjectBounds: false,
   is3D: localStorage.getItem("insar-view-mode") === "3d",
@@ -125,11 +121,6 @@ const layerText = {
   velocity: { title: "Velocity" },
   deformation: { title: "Deformation" },
   coherence: { title: "Coherence" },
-};
-
-const psLayerText = {
-  velocity: { title: "PS Velocity", field: "velocity_mm_yr", unit: "mm/year" },
-  displacement: { title: "PS Last Displacement", field: "displacement_last_mm", unit: "mm" },
 };
 
 const HEATMAP_PALETTES = {
@@ -794,8 +785,6 @@ function initializeMap() {
   state.map.createPane("insarRasterPane");
   state.map.getPane("insarRasterPane").style.zIndex = 410;
   state.map.getPane("insarRasterPane").style.pointerEvents = "none";
-  state.map.createPane("psPointPane");
-  state.map.getPane("psPointPane").style.zIndex = 650;
   state.map.createPane("selectedPixelPane");
   state.map.getPane("selectedPixelPane").style.zIndex = 720;
 
@@ -822,13 +811,11 @@ function drawMap() {
   const range = getDisplayRange(state.activeLayer, values);
   state.rasterValues = values;
   state.rasterRange = range;
-  state.psRange = getPsDisplayRange();
   if (state.is3D) {
     update3DScene();
   } else {
     updateRasterLayer();
   }
-  updatePsPointLayer();
 
   if (!state.hasFitProjectBounds) {
     state.map.fitBounds(bounds, { padding: [28, 28] });
@@ -841,49 +828,6 @@ function drawMap() {
   update3DSelection();
   updateLegend();
   updatePixelInfo();
-}
-
-function hasPsPoints() {
-  return Boolean(state.data?.layers?.ps_points?.available && state.data.layers.ps_points.points?.length);
-}
-
-function getPsLayerConfig(layer = state.psLayer) {
-  return psLayerText[layer] ?? null;
-}
-
-function getPsDisplayRange(layer = state.psLayer) {
-  const config = getPsLayerConfig(layer);
-  const points = state.data?.layers?.ps_points?.points ?? [];
-  if (!config || !points.length) return null;
-  const values = points
-    .map((point) => point[config.field])
-    .filter((value) => value !== null && value !== undefined && !Number.isNaN(value));
-  if (!values.length) return null;
-  const robust = computeRobustExtent(values, {
-    percentile: state.scaleSettings.percentile,
-    symmetric: state.scaleSettings.symmetric,
-  });
-  const linthresh = estimateNoiseFloor(layer === "displacement" ? "deformation" : "velocity", robust.extent);
-  const scale = {
-    mode: state.scaleSettings.mode,
-    negExtent: robust.negExtent,
-    posExtent: robust.posExtent,
-    rawNegExtent: robust.rawNegExtent,
-    rawPosExtent: robust.rawPosExtent,
-    linthresh,
-    gamma: state.scaleSettings.gamma,
-    percentile: state.scaleSettings.percentile,
-    symmetric: state.scaleSettings.symmetric,
-    locked: false,
-  };
-  return {
-    min: -scale.negExtent,
-    max: scale.posExtent,
-    p02: -scale.negExtent,
-    p98: scale.posExtent,
-    zeroHalfWidth: linthresh,
-    scale,
-  };
 }
 
 function leafletBounds() {
@@ -958,106 +902,6 @@ function createRasterGridLayer() {
   });
 }
 
-function updatePsPointLayer() {
-  if (!state.map || !state.data || !state.psLayer || !hasPsPoints() || !state.psRange) {
-    if (state.psPointLayer) {
-      state.psPointLayer.remove();
-      state.psPointLayer = null;
-    }
-    return;
-  }
-
-  if (!state.psPointLayer) {
-    state.psPointLayer = createPsPointGridLayer();
-    state.psPointLayer.addTo(state.map);
-  } else {
-    state.psPointLayer.redrawInPlace();
-  }
-}
-
-function createPsPointGridLayer() {
-  const PsPointGridLayer = L.GridLayer.extend({
-    createTile(coords) {
-      const tile = document.createElement("canvas");
-      const tileSize = this.getTileSize();
-      tile.width = tileSize.x;
-      tile.height = tileSize.y;
-      tile.className = "ps-point-tile";
-
-      const ctx = tile.getContext("2d");
-      ctx.imageSmoothingEnabled = true;
-      drawPsPointTile(ctx, coords, tileSize);
-
-      return tile;
-    },
-    redrawInPlace() {
-      const tiles = Object.values(this._tiles || {});
-      if (!tiles.length) {
-        this.redraw();
-        return;
-      }
-
-      tiles.forEach((tileRecord) => {
-        const tile = tileRecord.el;
-        const coords = tileRecord.coords;
-        if (!tile || !coords) return;
-        const ctx = tile.getContext("2d");
-        if (!ctx) return;
-        ctx.clearRect(0, 0, tile.width, tile.height);
-        ctx.imageSmoothingEnabled = true;
-        drawPsPointTile(ctx, coords, this.getTileSize());
-      });
-    },
-  });
-
-  return new PsPointGridLayer({
-    pane: "psPointPane",
-    tileSize: 256,
-    opacity: 1,
-    updateWhenIdle: false,
-    updateWhenZooming: true,
-    keepBuffer: 6,
-  });
-}
-
-function drawPsPointTile(ctx, coords, tileSize) {
-  const config = getPsLayerConfig();
-  const points = state.data?.layers?.ps_points?.points ?? [];
-  if (!state.map || !config || !points.length || !state.psRange) return;
-
-  const tileOrigin = L.point(coords.x * tileSize.x, coords.y * tileSize.y);
-  const tileBounds = L.bounds(tileOrigin, tileOrigin.add(tileSize));
-  points.forEach((point) => {
-    const value = point[config.field];
-    if (value === null || value === undefined || Number.isNaN(value)) return;
-    const projected = state.map.project([point.lat, point.lon], coords.z);
-    const footprint = psFootprintPixels(point.lat, coords.z);
-    const pixelBounds = L.bounds(
-      L.point(projected.x - footprint.width / 2, projected.y - footprint.height / 2),
-      L.point(projected.x + footprint.width / 2, projected.y + footprint.height / 2),
-    );
-    if (!tileBounds.intersects(pixelBounds)) return;
-
-    const x = projected.x - tileOrigin.x;
-    const y = projected.y - tileOrigin.y;
-    const isSelected = state.selectedPsPoint?.ps_id === point.ps_id;
-    const colorInfo = colorInfoForValue(value, state.psRange, config.field.includes("velocity") ? "velocity" : "deformation");
-    const color = colorInfo.color;
-
-    if (isSelected) {
-      ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
-      drawPixelShape(ctx, x, y, footprint.width + 8, footprint.height + 8);
-    }
-    ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.95)`;
-    drawPixelShape(ctx, x, y, footprint.width, footprint.height);
-    if (isSelected || Math.min(footprint.width, footprint.height) >= 2) {
-      ctx.lineWidth = isSelected ? 2.2 : Math.max(0.35, Math.min(0.8, Math.min(footprint.width, footprint.height) * 0.12));
-      ctx.strokeStyle = isSelected ? "#fcd900" : "rgba(17, 17, 17, 0.34)";
-      strokePixelShape(ctx, x, y, footprint.width, footprint.height);
-    }
-  });
-}
-
 function metersPerPixelAtLat(lat, zoom = state.map?.getZoom?.() ?? 10) {
   return (40075016.686 * Math.cos((lat * Math.PI) / 180)) / (256 * (2 ** zoom));
 }
@@ -1065,15 +909,6 @@ function metersPerPixelAtLat(lat, zoom = state.map?.getZoom?.() ?? 10) {
 function groundMetersToPixels(meters, lat, zoom) {
   const metersPerPixel = Math.max(metersPerPixelAtLat(lat, zoom), 0.000001);
   return meters / metersPerPixel;
-}
-
-function psFootprintPixels(lat, zoom = state.map?.getZoom?.() ?? 10) {
-  const footprint = state.data?.layers?.ps_points;
-  const minSize = footprint?.source === "ferretti_ps" ? 5 : 0.05;
-  return {
-    width: Math.max(minSize, groundMetersToPixels(footprint?.pixel_width_m ?? 3.4, lat, zoom)),
-    height: Math.max(minSize, groundMetersToPixels(footprint?.pixel_height_m ?? 13.5, lat, zoom)),
-  };
 }
 
 function sbasFootprintPixels(lat, zoom = state.map?.getZoom?.() ?? 10) {
@@ -1601,15 +1436,6 @@ function getExportLegendConfig() {
       range: state.rasterRange,
     };
   }
-  if (state.psLayer && state.psRange?.scale) {
-    const config = getPsLayerConfig();
-    return {
-      type: "continuous",
-      title: config.title,
-      subtitle: `PS overlay - ${config.unit}`,
-      range: state.psRange,
-    };
-  }
   return null;
 }
 
@@ -1677,56 +1503,15 @@ function exportMapFilename(viewMode = state.is3D ? "3d" : "2d") {
 
 function handleLeafletMapClick(event) {
   if (!state.data) return;
-  if (state.psLayer && hasPsPoints()) {
-    const psPoint = nearestPsPoint(event.containerPoint);
-    if (psPoint) {
-      state.selectedPsPoint = psPoint;
-      state.selectedPixel = null;
-      if (state.selectedPixelLayer) {
-        state.selectedPixelLayer.remove();
-        state.selectedPixelLayer = null;
-      }
-      showPixelPanel();
-      updatePsPointLayer();
-      updatePixelInfo();
-      drawTimeSeries();
-      updateLegendIndicator();
-      return;
-    }
-  }
-
   if (!state.activeLayer || !state.data.lat.length || !state.data.lon.length) return;
   if (!leafletBounds().contains(event.latlng)) return;
   const row = nearestIndex(state.data.lat, event.latlng.lat);
   const col = nearestIndex(state.data.lon, event.latlng.lng);
   state.selectedPixel = { row, col };
-  state.selectedPsPoint = null;
   showPixelPanel();
-  updatePsPointLayer();
   drawSelectedPixel();
   updatePixelInfo();
   drawTimeSeries();
-}
-
-function nearestPsPoint(containerPoint) {
-  const points = state.data?.layers?.ps_points?.points ?? [];
-  if (!points.length || !state.map) return null;
-  let nearest = null;
-  let nearestDistance = Infinity;
-  points.forEach((point) => {
-    const screenPoint = state.map.latLngToContainerPoint([point.lat, point.lon]);
-    const footprint = psFootprintPixels(point.lat);
-    const dx = Math.abs(screenPoint.x - containerPoint.x);
-    const dy = Math.abs(screenPoint.y - containerPoint.y);
-    const pad = 4;
-    const isInsideFootprint = dx <= footprint.width / 2 + pad && dy <= footprint.height / 2 + pad;
-    const distance = screenPoint.distanceTo(containerPoint);
-    if (isInsideFootprint && distance < nearestDistance) {
-      nearest = point;
-      nearestDistance = distance;
-    }
-  });
-  return nearest;
 }
 
 function nearestIndex(values, target) {
@@ -1743,9 +1528,6 @@ function nearestIndex(values, target) {
 }
 
 function syncViewMode() {
-  const supports3D = state.data?.project?.dataset_kind !== "ferretti_ps";
-  if (!supports3D) state.is3D = false;
-  els.view3dToggle.hidden = !supports3D;
   els.view3dToggle.setAttribute("aria-pressed", String(state.is3D));
   els.verticalExaggerationControl.hidden = !state.is3D;
   els.verticalExaggerationSlider.value = String(state.verticalExaggeration);
@@ -2480,15 +2262,11 @@ function syncQualityControls() {
 
 function updateControls() {
   els.datasetOptions.forEach((option) => {
-    const isPsOption = Boolean(option.dataset.psLayer);
-    const sbasLayerAvailable = isPsOption || Boolean(state.data?.project?.dataset_kind !== "ferretti_ps");
-    const isSelected = isPsOption
-      ? option.dataset.psLayer === state.psLayer
-      : option.dataset.layer === state.selectedLayer;
-    option.hidden = isPsOption ? !hasPsPoints() : !sbasLayerAvailable;
+    const isSelected = option.dataset.layer === state.selectedLayer;
+    option.hidden = false;
     option.classList.toggle("active", isSelected);
     option.setAttribute("aria-selected", String(isSelected));
-    option.dataset.activeLayer = String(!isPsOption && option.dataset.layer === state.activeLayer);
+    option.dataset.activeLayer = String(option.dataset.layer === state.activeLayer);
   });
   updateDatasetSelectValue();
 
@@ -2568,12 +2346,6 @@ function updateCoherenceBaselineSummary(index) {
 }
 
 function updateStatusFooter() {
-  if (state.data && state.psLayer && hasPsPoints() && !state.activeLayer) {
-    const count = state.data.layers.ps_points.points.length;
-    els.visiblePixelStatus.textContent = `${count.toLocaleString()} PS points visible`;
-    els.lastUpdatedStatus.textContent = `Last updated: ${formatDateTime(state.data.project.last_updated)}`;
-    return;
-  }
   if (!state.data || !state.activeLayer) {
     els.visiblePixelStatus.textContent = "No pixels visible";
     els.lastUpdatedStatus.textContent = "Last updated: n/a";
@@ -2587,8 +2359,7 @@ function updateStatusFooter() {
 
 function updateAppTitle() {
   const projectName = state.data ? projectFolderName(state.data.project.project_path) : "No project loaded";
-  const viewerName = state.data?.project?.dataset_kind === "ferretti_ps" ? "InSAR PSI Viewer" : "InSAR SBAS Viewer";
-  els.appTitle.textContent = `${viewerName} - ${projectName}`;
+  els.appTitle.textContent = `InSAR SBAS Viewer - ${projectName}`;
 }
 
 function formatDateTime(value) {
@@ -2605,13 +2376,6 @@ function formatDateTime(value) {
 
 function updateLegend() {
   if (!state.data || !state.activeLayer) {
-    if (state.data && state.psLayer && state.psRange) {
-      const config = getPsLayerConfig();
-      els.legendTitle.textContent = config.title;
-      els.legendSubtitle.textContent = `PS overlay - ${config.unit}`;
-      renderContinuousLegend(state.psRange, config.unit, config.field.includes("velocity") ? "velocity" : "deformation");
-      return;
-    }
     els.legendTitle.textContent = "No dataset selected";
     els.legendSubtitle.textContent = "-";
     els.legendItems.replaceChildren();
@@ -2808,11 +2572,6 @@ function renderLegendMessage(message) {
 }
 
 function getSelectedLegendValue() {
-  if (state.data && state.selectedPsPoint && state.psLayer) {
-    const config = getPsLayerConfig();
-    const value = state.selectedPsPoint?.[config?.field];
-    return value === null || value === undefined || Number.isNaN(value) ? null : value;
-  }
   if (!state.data || !state.activeLayer || !state.selectedPixel) return null;
   const { row, col } = state.selectedPixel;
   const value = getLayerValues()?.[row]?.[col];
@@ -2858,10 +2617,6 @@ function formatLegendDate(value) {
 }
 
 function updatePixelInfo() {
-  if (state.data && state.selectedPsPoint) {
-    updatePsPixelInfo(state.selectedPsPoint);
-    return;
-  }
   if (!state.data || !state.selectedPixel) {
     resetPixelInfo();
     return;
@@ -2891,28 +2646,6 @@ function updatePixelInfo() {
   els.pixelDeformation.textContent = `${formatNumber(deformation)} mm`;
   els.pixelPasses.textContent = isFilterableLayer() ? (passes ? "Yes" : "No") : "Not applied";
   els.pixelPanelSubtitle.textContent = `${formatNumber(state.data.lat[row], 5)}, ${formatNumber(state.data.lon[col], 5)}`;
-  updateLegendIndicator();
-}
-
-function updatePsPixelInfo(point) {
-  const validPairs = point.valid_pair_count ?? "-";
-  const totalPairs = state.data?.layers?.n_good_pairs?.n_pairs_total ?? "-";
-  const isFerretti = state.data?.layers?.ps_points?.source === "ferretti_ps";
-  els.pixelLat.textContent = formatNumber(point.lat, 6);
-  els.pixelLon.textContent = formatNumber(point.lon, 6);
-  els.pixelElevation.textContent = "n/a";
-  els.pixelVelocity.textContent = `${formatNumber(point.velocity_mm_yr)} mm/year`;
-  els.pixelCoherenceLabel.innerHTML = `${isFerretti ? "Residual gamma after APS" : "Median correlation"} <span class="metric-hint">high = good</span>`;
-  els.pixelCoherence.textContent = formatNumber(point.corr_median, 2);
-  els.pixelStabilityLabel.innerHTML = isFerretti
-    ? "Amplitude dispersion index <span class=\"metric-hint\">low = good</span>"
-    : "Stability (std) <span class=\"metric-hint\">low = good</span>";
-  els.pixelStability.textContent = formatNumber(point.psf, 2);
-  els.pixelGoodPairs.textContent = `${validPairs} / ${totalPairs}`;
-  els.pixelRmse.textContent = `${formatNumber(point.rmse_mm, 2)} ${point.rmse_unit ?? "mm"}`;
-  els.pixelDeformation.textContent = `${formatNumber(point.displacement_last_mm)} mm`;
-  els.pixelPasses.textContent = point.is_reference_ps ? "Reference PS" : "PS geocoded";
-  els.pixelPanelSubtitle.textContent = `PS ${point.ps_id}${point.is_reference_ps ? " (reference)" : ""} - ${formatNumber(point.lat, 5)}, ${formatNumber(point.lon, 5)}`;
   updateLegendIndicator();
 }
 
@@ -2947,16 +2680,14 @@ function drawTimeSeries() {
   ctx.strokeStyle = "#d8dee8";
   ctx.strokeRect(padding, padding, width, height);
 
-  if (!state.data || (!state.selectedPixel && !state.selectedPsPoint)) {
+  if (!state.data || !state.selectedPixel) {
     ctx.fillStyle = "#627083";
     ctx.font = `${13 * (window.devicePixelRatio || 1)}px Arial`;
-    ctx.fillText("Click a map pixel or PS point to show its deformation series.", padding, padding + 24);
+    ctx.fillText("Click a map pixel to show its deformation series.", padding, padding + 24);
     return;
   }
 
-  const values = state.selectedPsPoint
-    ? state.selectedPsPoint.timeseries ?? []
-    : state.data.layers.deformation.values.map((plane) => plane[state.selectedPixel.row][state.selectedPixel.col]);
+  const values = state.data.layers.deformation.values.map((plane) => plane[state.selectedPixel.row][state.selectedPixel.col]);
   const valid = values.filter((value) => value !== null && !Number.isNaN(value));
   if (!valid.length) {
     ctx.fillStyle = "#627083";
@@ -2996,7 +2727,7 @@ function drawTimeSeries() {
 
   values.forEach((value, index) => {
     if (value === null || Number.isNaN(value)) return;
-    ctx.fillStyle = index === state.dateIndex ? "#b6362d" : state.selectedPsPoint ? "#6f3fb5" : "#176b87";
+    ctx.fillStyle = index === state.dateIndex ? "#b6362d" : "#176b87";
     ctx.beginPath();
     ctx.arc(xForIndex(index), yForValue(value), 4 * (window.devicePixelRatio || 1), 0, Math.PI * 2);
     ctx.fill();
@@ -3021,9 +2752,7 @@ function renderDatasetDetails() {
   const bounds = project.bounds;
   els.datasetProjectLabel.textContent = `Project: ${projectFolderName(project.project_path)}`;
   els.datasetFile.textContent = project.dataset_file;
-  els.gridDetails.textContent = project.dataset_kind === "ferretti_ps"
-    ? `${state.data.layers.ps_points.points.length} geocoded PS points, ${project.date_count} dates`
-    : `${project.lat_count} rows x ${project.lon_count} columns, ${project.date_count} dates`;
+  els.gridDetails.textContent = `${project.lat_count} rows x ${project.lon_count} columns, ${project.date_count} dates`;
   els.boundsDetails.textContent = `${formatNumber(bounds.lat_min, 5)} to ${formatNumber(bounds.lat_max, 5)} lat; ${formatNumber(bounds.lon_min, 5)} to ${formatNumber(bounds.lon_max, 5)} lon`;
 }
 
@@ -3037,16 +2766,6 @@ function initializeLoadedProjectState() {
   state.dateIndex = Math.max(0, state.data.dates.length - 1);
   state.coherencePairIndex = 0;
   state.selectedPixel = null;
-  state.selectedPsPoint = null;
-
-  if (state.data.project.dataset_kind === "ferretti_ps") {
-    state.selectedLayer = null;
-    state.activeLayer = null;
-    state.psLayer = "velocity";
-    state.is3D = false;
-  } else if (!state.data.layers.ps_points?.available) {
-    state.psLayer = null;
-  }
 }
 
 async function loadProject(projectPath = "") {
@@ -3251,7 +2970,6 @@ function paletteGradient(colors) {
 function selectedLayerNames() {
   const names = [];
   if (state.selectedLayer) names.push(layerText[state.selectedLayer].title);
-  if (state.psLayer) names.push(psLayerText[state.psLayer].title);
   return names;
 }
 
@@ -3282,19 +3000,10 @@ function toggleSelectedLayer(layer) {
     state.selectedLayer = layer;
     state.activeLayer = layer;
   }
-  state.selectedPsPoint = null;
 
   updateControls();
   drawMap();
   drawTimeSeries();
-}
-
-function togglePsLayer(layer) {
-  state.psLayer = state.psLayer === layer ? null : layer;
-  state.selectedPsPoint = null;
-  state.psRange = getPsDisplayRange();
-  updateControls();
-  drawMap();
 }
 
 async function openProjectFromFolderPicker() {
@@ -3336,7 +3045,6 @@ els.mapFrame.addEventListener("contextmenu", showMapContextMenu, true);
 els.exportMapImageButton.addEventListener("click", exportMapImage);
 
 els.view3dToggle.addEventListener("click", () => {
-  if (state.data?.project?.dataset_kind === "ferretti_ps") return;
   state.is3D = !state.is3D;
   localStorage.setItem("insar-view-mode", state.is3D ? "3d" : "2d");
   syncViewMode();
@@ -3427,10 +3135,6 @@ els.datasetSelectButton.addEventListener("click", () => {
 
 els.datasetOptions.forEach((option) => {
   option.addEventListener("click", () => {
-    if (option.dataset.psLayer) {
-      togglePsLayer(option.dataset.psLayer);
-      return;
-    }
     toggleSelectedLayer(option.dataset.layer);
   });
 });
@@ -3677,15 +3381,10 @@ function resetMapLayers() {
     state.rasterLayer.remove();
     state.rasterLayer = null;
   }
-  if (state.psPointLayer) {
-    state.psPointLayer.remove();
-    state.psPointLayer = null;
-  }
   if (state.selectedPixelLayer) {
     state.selectedPixelLayer.remove();
     state.selectedPixelLayer = null;
   }
-  state.selectedPsPoint = null;
 }
 
 updateControls();
