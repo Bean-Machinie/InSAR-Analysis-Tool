@@ -8,6 +8,7 @@ const state = {
     coherence: 0.3,
     rmse: null,
     significantOnly: false,
+    useLandmask: true,
     stability: 0.2,
     goodPairs: 0,
   },
@@ -83,6 +84,7 @@ const els = {
   rmseThresholdSlider: document.querySelector("#rmse-threshold-slider"),
   rmseThresholdValue: document.querySelector("#rmse-threshold-value"),
   significantOnlyToggle: document.querySelector("#significant-only-toggle"),
+  landmaskToggle: document.querySelector("#landmask-toggle"),
   stabilityMaxSlider: document.querySelector("#stability-max-slider"),
   stabilityMaxValue: document.querySelector("#stability-max-value"),
   goodPairsMinSlider: document.querySelector("#good-pairs-min-slider"),
@@ -128,6 +130,7 @@ const layerText = {
   deformation: { title: "Deformation" },
   coherence: { title: "Coherence" },
   rmse: { title: "RMSE" },
+  landmask: { title: "Landmask" },
 };
 
 const HEATMAP_PALETTES = {
@@ -332,6 +335,7 @@ function getLayerValues(layer = state.activeLayer) {
   if (layer === "velocity") return state.data.layers.velocity.values;
   if (layer === "coherence") return getCoherenceValues();
   if (layer === "rmse") return state.data.layers.rmse.values;
+  if (layer === "landmask") return state.data.layers.landmask.values;
   if (layer === "deformation") return getDeformationValues();
   return null;
 }
@@ -372,16 +376,24 @@ function getLayerRange(layer = state.activeLayer) {
   if (layer === "velocity") return state.data.layers.velocity.range;
   if (layer === "coherence") return state.data.layers.coherence.range;
   if (layer === "rmse") return state.data.layers.rmse.range;
+  if (layer === "landmask") return { min: 0, max: 1, p02: 0, p98: 1 };
   return state.data.layers.deformation.range;
 }
 
 function getDisplayRange(layer = state.activeLayer, values = getLayerValues(layer)) {
   if (!state.data || !layer || !values) return getLayerRange(layer);
   if (layer === "coherence") {
-    return state.data.layers.coherence.range;
+    const visibleValues = getVisibleValues(layer, values);
+    if (!visibleValues.length) return { min: null, max: null, p02: null, p98: null };
+    return positiveDisplayRange(visibleValues, 0, 1);
   }
   if (layer === "rmse") {
-    return state.data.layers.rmse.range;
+    const visibleValues = getVisibleValues(layer, values);
+    if (!visibleValues.length) return { min: null, max: null, p02: null, p98: null };
+    return positiveDisplayRange(visibleValues);
+  }
+  if (layer === "landmask") {
+    return { min: 0, max: 1, p02: 0, p98: 1 };
   }
 
   const scaleValues = getScaleValues(layer, values);
@@ -459,6 +471,21 @@ function computeRobustExtent(values, { percentile = 99.9, symmetric = true } = {
   };
 }
 
+function positiveDisplayRange(values, floor = null, ceiling = null) {
+  const sorted = values
+    .filter((value) => value !== null && value !== undefined && !Number.isNaN(value))
+    .sort((a, b) => a - b);
+  if (!sorted.length) return { min: null, max: null, p02: null, p98: null };
+  const min = sorted[0];
+  const max = sorted[sorted.length - 1];
+  return {
+    min: floor === null ? min : Math.max(floor, min),
+    max: ceiling === null ? max : Math.min(ceiling, max),
+    p02: floor === null ? quantileSorted(sorted, 0.02) : Math.max(floor, quantileSorted(sorted, 0.02)),
+    p98: ceiling === null ? quantileSorted(sorted, 0.98) : Math.min(ceiling, quantileSorted(sorted, 0.98)),
+  };
+}
+
 function quantileSorted(sortedValues, q) {
   if (!sortedValues.length) return null;
   const index = clamp(q, 0, 1) * (sortedValues.length - 1);
@@ -476,9 +503,8 @@ function getVisibleValues(layer = state.activeLayer, values = getLayerValues(lay
   for (let y = 0; y < values.length; y += 1) {
     for (let x = 0; x < values[y].length; x += 1) {
       const value = values[y][x];
-      const hiddenByFilter = isFilterableLayer(layer) && !pixelPassesFilter(y, x);
       if (
-        !hiddenByFilter
+        pixelIsVisible(y, x, layer)
         && value !== null
         && value !== undefined
         && !Number.isNaN(value)
@@ -491,9 +517,6 @@ function getVisibleValues(layer = state.activeLayer, values = getLayerValues(lay
 }
 
 function getScaleValues(layer = state.activeLayer, values = getLayerValues(layer)) {
-  if (layer === "deformation") {
-    return getFinalDeformationValues() || values;
-  }
   return values;
 }
 
@@ -528,7 +551,7 @@ function estimateDeformationNoiseFloor({ sampleSize = 8000, minEpochs = 8 } = {}
   for (let linearIndex = 0; linearIndex < total; linearIndex += step) {
     const row = Math.floor(linearIndex / cols);
     const col = linearIndex % cols;
-    if (!pixelPassesFilter(row, col)) continue;
+    if (!pixelIsVisible(row, col, state.activeLayer)) continue;
 
     const series = [];
     for (let epoch = 0; epoch < stack.length; epoch += 1) {
@@ -588,7 +611,7 @@ function isFilterableLayer(layer = state.activeLayer) {
 }
 
 function isDiagnosticLayer(layer = state.activeLayer) {
-  return layer === "coherence" || layer === "rmse";
+  return layer === "coherence" || layer === "rmse" || layer === "landmask";
 }
 
 function totalPairCount() {
@@ -621,6 +644,17 @@ function qualityValue(layer, row, col) {
   return state.data?.layers?.[layer]?.values?.[row]?.[col] ?? null;
 }
 
+function pixelPassesLandmask(row, col) {
+  if (!state.qualityThresholds.useLandmask || state.activeLayer === "landmask") return true;
+  const landmask = qualityValue("landmask", row, col);
+  return landmask === null || Number(landmask) > 0;
+}
+
+function pixelIsVisible(row, col, layer = state.activeLayer) {
+  if (!pixelPassesLandmask(row, col)) return false;
+  return isFilterableLayer(layer) ? pixelPassesFilter(row, col) : true;
+}
+
 function pixelPassesFilter(row, col) {
   if (!state.data) return false;
 
@@ -630,9 +664,8 @@ function pixelPassesFilter(row, col) {
   const velocity = qualityValue("velocity", row, col);
   const stability = qualityValue("coherence_stability", row, col);
   const goodPairs = qualityValue("n_good_pairs", row, col);
-  const landmask = qualityValue("landmask", row, col);
 
-  if (landmask !== null && Number(landmask) <= 0) return false;
+  if (!pixelPassesLandmask(row, col)) return false;
   if (coherence !== null && coherence < thresholds.coherence) return false;
   if (rmse !== null && thresholds.rmse !== null && rmse > thresholds.rmse) return false;
   if (thresholds.significantOnly && rmse !== null && velocity !== null && Math.abs(velocity) <= 2 * rmse) return false;
@@ -659,7 +692,7 @@ function visiblePixelSummary(values = getLayerValues(), sampleLimit = 25000) {
     if (
       value !== null
       && !Number.isNaN(value)
-      && pixelPassesFilter(row, col)
+      && pixelIsVisible(row, col, state.activeLayer)
     ) {
       visible += 1;
     }
@@ -685,7 +718,7 @@ function exactVisiblePixelSummary(values = getLayerValues()) {
       if (
         value !== null
         && !Number.isNaN(value)
-        && pixelPassesFilter(row, col)
+        && pixelIsVisible(row, col, state.activeLayer)
       ) {
         visible += 1;
       }
@@ -709,8 +742,16 @@ function colorInfoForValue(value, range, layer) {
   }
 
   if (layer === "coherence") {
-    const t = clamp(value, 0, 1);
+    const min = range.p02 ?? range.min ?? 0;
+    const max = range.p98 ?? range.max ?? 1;
+    const t = max === min ? 0.5 : clamp((value - min) / (max - min), 0, 1);
     const color = colorFromPalette(t, COHERENCE_LEGEND_COLORS);
+    return { color: [...color, 255], t, isOver: false, isUnder: false };
+  }
+
+  if (layer === "landmask") {
+    const t = Number(value) > 0 ? 1 : 0;
+    const color = t ? [238, 203, 77] : [24, 63, 96];
     return { color: [...color, 255], t, isOver: false, isUnder: false };
   }
 
@@ -1058,7 +1099,7 @@ function drawRasterTile(ctx, coords, tileSize) {
 
     for (let col = colRange.start; col <= colRange.end; col += 1) {
       const value = values[row][col];
-      const hiddenByFilter = isFilterableLayer() && !pixelPassesFilter(row, col);
+      const hiddenByFilter = !pixelIsVisible(row, col, state.activeLayer);
 
       if (hiddenByFilter || value === null || Number.isNaN(value)) continue;
 
@@ -1422,7 +1463,7 @@ function drawPixelGridForExport(ctx, scale, values, colorResolver, options = {})
 
     cols.forEach((col) => {
       const value = options.selectedOnly ? state.rasterValues?.[row]?.[col] : values[row][col];
-      const hiddenByFilter = isFilterableLayer() && !pixelPassesFilter(row, col);
+      const hiddenByFilter = !pixelIsVisible(row, col, state.activeLayer);
       if (!options.selectedOnly && (hiddenByFilter || value === null || value === undefined || Number.isNaN(value))) return;
 
       const west = Math.min(lonEdges[col], lonEdges[col + 1]);
@@ -2028,7 +2069,7 @@ function update3DPoints() {
   for (let row = 0; row < values.length; row += 1) {
     for (let col = 0; col < values[row].length; col += 1) {
       const value = values[row][col];
-      const hiddenByFilter = isFilterableLayer() && !pixelPassesFilter(row, col);
+      const hiddenByFilter = !pixelIsVisible(row, col, state.activeLayer);
       if (hiddenByFilter || value === null || Number.isNaN(value)) continue;
       const colorInfo = colorInfoForValue(value, state.rasterRange, state.activeLayer);
       const color = colorInfo.color;
@@ -2420,6 +2461,8 @@ function syncQualityControls() {
   els.rmseThresholdSlider.value = String(thresholds.rmse ?? rmseMax);
   els.rmseThresholdValue.textContent = `${formatNumber(thresholds.rmse ?? rmseMax, 1)} mm`;
   els.significantOnlyToggle.checked = Boolean(thresholds.significantOnly);
+  els.landmaskToggle.checked = Boolean(thresholds.useLandmask);
+  els.landmaskToggle.closest(".toggle-control").hidden = !hasLayerValues("landmask");
   els.stabilityMaxSlider.value = thresholds.stability.toFixed(2);
   els.stabilityMaxValue.textContent = thresholds.stability.toFixed(2);
   els.goodPairsMinSlider.max = String(goodPairSliderMax);
@@ -2566,13 +2609,32 @@ function updateLegend() {
   if (state.activeLayer === "coherence") {
     els.legendTitle.textContent = "Coherence";
     els.legendSubtitle.textContent = getCoherenceStackKind() === "pair" ? "pair reliability" : "median reliability";
-    renderLegendRows(buildLegendBins(0, 1, COHERENCE_LEGEND_COLORS.length), "unitless", state.activeLayer, renderRange);
+    renderLegendRows(
+      buildLegendBins(renderRange.p02 ?? 0, renderRange.p98 ?? 1, COHERENCE_LEGEND_COLORS.length),
+      "unitless",
+      state.activeLayer,
+      renderRange,
+    );
     return;
   }
   if (state.activeLayer === "rmse") {
     els.legendTitle.textContent = "RMSE (mm)";
     els.legendSubtitle.textContent = "diagnostic uncertainty map";
     renderContinuousLegend(renderRange, "mm", state.activeLayer);
+    return;
+  }
+  if (state.activeLayer === "landmask") {
+    els.legendTitle.textContent = "Landmask";
+    els.legendSubtitle.textContent = "yellow = kept, blue = masked";
+    renderLegendRows(
+      [
+        { low: 0, high: 0.5, color: [24, 63, 96] },
+        { low: 0.5, high: 1, color: [238, 203, 77] },
+      ],
+      "mask",
+      state.activeLayer,
+      renderRange,
+    );
     return;
   }
 
@@ -2629,7 +2691,9 @@ function renderLegendRows(bins, unit, layer, renderRange) {
 
   const ticks = document.createElement("div");
   ticks.className = "map-legend-ticks";
-  [bins[0]?.low ?? 0, 0.5, bins.at(-1)?.high ?? 1].forEach((value) => {
+  const low = bins[0]?.low ?? 0;
+  const high = bins.at(-1)?.high ?? 1;
+  [low, (low + high) / 2, high].forEach((value) => {
     const tick = document.createElement("span");
     tick.textContent = formatLegendNumber(value);
     tick.title = unit;
@@ -3439,6 +3503,12 @@ els.rmseThresholdSlider.addEventListener("input", () => {
 
 els.significantOnlyToggle.addEventListener("change", () => {
   state.qualityThresholds.significantOnly = els.significantOnlyToggle.checked;
+  syncQualityControls();
+  drawMap();
+});
+
+els.landmaskToggle.addEventListener("change", () => {
+  state.qualityThresholds.useLandmask = els.landmaskToggle.checked;
   syncQualityControls();
   drawMap();
 });

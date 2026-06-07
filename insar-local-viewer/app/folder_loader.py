@@ -176,6 +176,22 @@ def load_folder_project(project_dir: Path) -> dict:
         if entry.get("units") is not None:
             units[key] = str(entry.get("units"))
 
+    # Older folder manifests may omit the optional landmask even when
+    # landmask.nc was exported beside metadata.json. Load it opportunistically
+    # so water pixels can be excluded without requiring a manifest rewrite.
+    if "landmask" not in layers:
+        fallback_landmask = root / "landmask.nc"
+        if fallback_landmask.is_file():
+            try:
+                data_array = xr.open_dataarray(fallback_landmask, engine=NETCDF_ENGINE)
+                data_array = data_array.load()
+                data_array.close()
+                layers["landmask"] = data_array
+                units["landmask"] = "0/1"
+            except Exception as exc:  # noqa: BLE001 - optional by design
+                log.warning("Could not load optional landmask (%s): %s; skipping.", fallback_landmask.name, exc)
+                missing.append("landmask")
+
     if not layers:
         raise FolderProjectError(f"Manifest at {manifest_path} listed no loadable layers.")
 
